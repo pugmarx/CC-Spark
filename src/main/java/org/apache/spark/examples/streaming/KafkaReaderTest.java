@@ -17,15 +17,19 @@
 
 package org.apache.spark.examples.streaming;
 
-import kafka.serializer.StringDecoder;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.streaming.Duration;
-import org.apache.spark.streaming.api.java.*;
+import org.apache.spark.streaming.api.java.JavaDStream;
+import org.apache.spark.streaming.api.java.JavaPairDStream;
+import org.apache.spark.streaming.api.java.JavaPairReceiverInputDStream;
+import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import org.apache.spark.streaming.kafka.KafkaUtils;
 import scala.Tuple2;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -44,36 +48,16 @@ import java.util.regex.Pattern;
 
 public final class KafkaReaderTest {
 
-    private static final String ZK_HOST = "localhost:2181";
-    private static final String IN_TOPIC = "testclean";
+    private static final String ZK_HOST = "localhost:2181"; // FIXME
+    private static final String IN_TOPIC = "testspark"; // FIXME
     private static final String IN_GROUP = "spark_" + UUID.randomUUID(); //FIXME
     private static final String NUM_THREADS = "1";
 
     //private static final Pattern SPACE = Pattern.compile(" ");
     private static final Pattern COMMA = Pattern.compile(",");
 
-
-    static class RelevantIndex implements PairFunction<String, String, Integer> {
-        int relIndex = 0;
-        @SuppressWarnings("unused")
-        public RelevantIndex() {
-        }
-        public RelevantIndex(int index) {
-            relIndex = index;
-        }
-        public Tuple2<String, Integer> apply(String line) {
-            return new Tuple2(line.split(",")[relIndex], Integer.valueOf(1));
-        }
-        @Override
-        public Tuple2<String, Integer> call(String s) throws Exception {
-            return new Tuple2(s.split(",")[relIndex], Integer.valueOf(1));
-        }
-    }
-
-
     private KafkaReaderTest() {
     }
-
 
     public static void main(String[] args) throws Exception {
 
@@ -84,15 +68,15 @@ public final class KafkaReaderTest {
             // Create the context with 2 seconds batch size
             JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(20000)); //FIXME duration
 
-            Map<String, String> kafkaParams = new HashMap<>();
-            kafkaParams.put("metadata.broker.list", "localhost:9092");
+            int numThreads = Integer.parseInt(NUM_THREADS);
+            Map<String, Integer> topicMap = new HashMap<>();
+            String[] topics = IN_TOPIC.split(",");
+            for (String topic : topics) {
+                topicMap.put(topic, numThreads);
+            }
 
-            Set<String> topics = new HashSet();
-            //topics.add("testclean");
-            topics.add("testspark"); //FIXME
-
-            JavaPairInputDStream<String, String> messages = KafkaUtils.createDirectStream(jssc, String.class,
-                    String.class, StringDecoder.class, StringDecoder.class, kafkaParams, topics);
+            JavaPairReceiverInputDStream<String, String> messages =
+                    KafkaUtils.createStream(jssc, ZK_HOST, IN_GROUP, topicMap);
 
             // Assuming that this gets the records from the message RDD
             JavaDStream<String> lines = messages.map(Tuple2::_2);
@@ -103,10 +87,6 @@ public final class KafkaReaderTest {
             JavaPairDStream<String, Integer> allRecs = origins.union(destinations);
 
             JavaPairDStream<String, Integer> summarized = allRecs.reduceByKey((i1, i2) -> i1 + i2);
-
-            //JavaPairDStream<String, Integer> wordCounts = flights.mapToPair(s -> new Tuple2<>(s, 1))
-            //         .reduceByKey((i1, i2) -> i1 + i2);
-
 
             summarized.foreachRDD(rdd -> {
                 if (rdd.count() > 0) {
@@ -123,52 +103,25 @@ public final class KafkaReaderTest {
         }
     }
 
-    //FIXME USING OTHER MAIN
-    public static void main1(String[] args) throws Exception {
-        if (args.length < 4) {
-            System.out.println("-- Choosing defaults --");
-            //System.err.println("Usage: JavaKafkaWordCount <zkQuorum> <group> <topics> <numThreads>");
-            //System.exit(1);
+
+    static class RelevantIndex implements PairFunction<String, String, Integer> {
+        int relIndex = 0;
+
+        @SuppressWarnings("unused")
+        public RelevantIndex() {
         }
 
-
-        //StreamingExamples.setStreamingLogLevels();
-        SparkConf sparkConf = new SparkConf().setAppName("KafkaReaderTest");
-
-        // Create the context with 2 seconds batch size
-        JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(2000));
-
-        int numThreads = Integer.parseInt(NUM_THREADS);
-        Map<String, Integer> topicMap = new HashMap<>();
-        String[] topics = IN_TOPIC.split(",");
-        for (String topic : topics) {
-            topicMap.put(topic, numThreads);
+        public RelevantIndex(int index) {
+            relIndex = index;
         }
 
-        JavaPairReceiverInputDStream<String, String> messages =
-                KafkaUtils.createStream(jssc, ZK_HOST, IN_GROUP, topicMap);
+        public Tuple2<String, Integer> apply(String line) {
+            return new Tuple2(line.split(",")[relIndex], Integer.valueOf(1));
+        }
 
-
-        JavaDStream<String> lines = messages.map(Tuple2::_2);
-
-        JavaDStream<String> fields = lines.flatMap(x -> Arrays.asList(COMMA.split(x)).iterator());
-
-
-        JavaPairDStream<String, Integer> wordCounts = fields.mapToPair(s -> new Tuple2<>(s, 1))
-                .reduceByKey((i1, i2) -> i1 + i2);
-
-
-        System.out.println("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
-        wordCounts.print();
-        wordCounts.foreachRDD(rdd -> {
-            if (!rdd.isEmpty()) {
-                rdd.coalesce(1).saveAsTextFile("/Users/Hobbes/NaqiGDrive/CouldComputingSpecialization/Course6/idea-spark/cc-spark/output.txt");
-            }
-        });
-
-        System.out.println("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
-
-        jssc.start();
-        jssc.awaitTermination();
+        @Override
+        public Tuple2<String, Integer> call(String s) throws Exception {
+            return new Tuple2(s.split(",")[relIndex], Integer.valueOf(1));
+        }
     }
 }
