@@ -18,16 +18,20 @@
 package org.apache.spark.examples.streaming;
 
 import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.Optional;
+import org.apache.spark.api.java.function.Function2;
+import org.apache.spark.api.java.function.Function3;
 import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.streaming.Duration;
-import org.apache.spark.streaming.api.java.JavaDStream;
-import org.apache.spark.streaming.api.java.JavaPairDStream;
-import org.apache.spark.streaming.api.java.JavaPairReceiverInputDStream;
-import org.apache.spark.streaming.api.java.JavaStreamingContext;
+import org.apache.spark.streaming.State;
+import org.apache.spark.streaming.StateSpec;
+import org.apache.spark.streaming.api.java.*;
 import org.apache.spark.streaming.kafka.KafkaUtils;
 import scala.Tuple2;
 
+
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -52,6 +56,10 @@ public final class KafkaReaderTest {
     private static final String IN_TOPIC = "testspark"; // FIXME
     private static final String IN_GROUP = "spark_" + UUID.randomUUID(); //FIXME
     private static final String NUM_THREADS = "1";
+    private static final String CHECKPOINT_DIR = "/tmp/spark_checkpoints";
+    private static final String STREAMING_JOB_COUNT = "10";
+    private static final int FETCH_COUNT_INTERVAL = 20000; // FIXME
+    private static final String MASTER_STRING = "local[*]";
 
     //private static final Pattern SPACE = Pattern.compile(" ");
     private static final Pattern COMMA = Pattern.compile(",");
@@ -62,11 +70,12 @@ public final class KafkaReaderTest {
     public static void main(String[] args) throws Exception {
 
         try {
-            SparkConf sparkConf = new SparkConf().setAppName("KafkaReaderTest2").setMaster("local[*]");
-            sparkConf.set("spark.streaming.concurrentJobs", "30");
+            SparkConf sparkConf = new SparkConf().setAppName("KafkaReaderTest2").setMaster(MASTER_STRING);
+            sparkConf.set("spark.streaming.concurrentJobs", STREAMING_JOB_COUNT);
 
             // Create the context with 2 seconds batch size
-            JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(20000)); //FIXME duration
+            JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(FETCH_COUNT_INTERVAL)); //FIXME duration
+            jssc.checkpoint(CHECKPOINT_DIR);
 
             int numThreads = Integer.parseInt(NUM_THREADS);
             Map<String, Integer> topicMap = new HashMap<>();
@@ -86,6 +95,7 @@ public final class KafkaReaderTest {
             JavaPairDStream<String, Integer> destinations = lines.mapToPair(new RelevantIndex(6));
             JavaPairDStream<String, Integer> allRecs = origins.union(destinations);
 
+            //JavaPairDStream<String, Integer> summarized = allRecs.reduceByKey((i1, i2) -> i1 + i2);
             JavaPairDStream<String, Integer> summarized = allRecs.reduceByKey((i1, i2) -> i1 + i2);
 
             summarized.foreachRDD(rdd -> {
@@ -95,7 +105,12 @@ public final class KafkaReaderTest {
                     System.out.println("======== NOTHING IN RDD =============");
                 }
             });
-            summarized.print();
+
+            // Store in a stateful ds
+            JavaPairDStream<String, Integer> statefulMap = summarized.updateStateByKey(COMPUTE_RUNNING_SUM);
+
+            //summarized.print();
+            statefulMap.print();
             jssc.start();
             jssc.awaitTermination();
         } catch (Exception e) {
@@ -103,6 +118,15 @@ public final class KafkaReaderTest {
         }
     }
 
+    // List of incoming vals, currentVal, returnVal
+    private static Function2<List<Integer>, Optional<Integer>, Optional<Integer>>
+            COMPUTE_RUNNING_SUM = (nums, current) -> {
+        int sum = current.orElse(0);
+        for (int i : nums) {
+            sum += i;
+        }
+        return Optional.of(sum);
+    };
 
     static class RelevantIndex implements PairFunction<String, String, Integer> {
         int relIndex = 0;
