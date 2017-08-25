@@ -6,7 +6,7 @@
 # Log file
 *.log
 
-.idea
+.idea/
 
 # BlueJ files
 *.ctxt
@@ -78,7 +78,6 @@ coverage.xml
 *.pot
 
 # Django stuff:
-*.log
 local_settings.py
 
 # Flask stuff:
@@ -120,6 +119,4 @@ ENV/
 # Rope project settings
 .ropeproject
 ### Scala template
-*.class
-*.log
 
