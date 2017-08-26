@@ -19,7 +19,10 @@ package org.apache.spark.examples.streaming;
 
 import org.apache.log4j.Logger;
 import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.Optional;
+import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.Function2;
 import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.streaming.Duration;
@@ -30,6 +33,7 @@ import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import org.apache.spark.streaming.kafka.KafkaUtils;
 import scala.Tuple2;
 
+import java.io.Serializable;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,7 +78,7 @@ public final class G1Q1 {
             JavaPairReceiverInputDStream<String, String> messages =
                     KafkaUtils.createStream(jssc, ZK_HOST, IN_GROUP, topicMap);
 
-            // Assuming that this gets the records from the message RDD
+            // Pick the messages
             JavaDStream<String> lines = messages.map(Tuple2::_2);
 
             // FIXME, smarter way to do this??
@@ -82,21 +86,19 @@ public final class G1Q1 {
             JavaPairDStream<String, Integer> destinations = lines.mapToPair(new RelevantIndex(6));
             JavaPairDStream<String, Integer> allRecs = origins.union(destinations);
 
-            //JavaPairDStream<String, Integer> summarized = allRecs.reduceByKey((i1, i2) -> i1 + i2);
             JavaPairDStream<String, Integer> summarized = allRecs.reduceByKey((i1, i2) -> i1 + i2);
-
-            /*summarized.foreachRDD(rdd -> {
-                if (rdd.count() > 0) {
-                    System.out.println("----------->" + rdd.count());
-                } else {
-                    System.out.println("======== NOTHING IN RDD =============");
-                }
-            });*/
 
             // Store in a stateful ds
             JavaPairDStream<String, Integer> statefulMap = summarized.updateStateByKey(COMPUTE_RUNNING_SUM);
 
-            statefulMap.print();
+            // FIXME
+            //JavaDStream<AirportKey> airports = statefulMap.map(new Transformer());
+            JavaPairDStream<AirportKey, Integer> airports = statefulMap.mapToPair(new PairConverter());
+
+            JavaDStream<AirportKey> sortedAirports = airports.transform(new RDDSortTransformer());
+
+            sortedAirports.print(10);
+            //statefulMap.print();
 
             jssc.start();
             jssc.awaitTermination();
@@ -104,6 +106,36 @@ public final class G1Q1 {
             LOG.error("----- Error while running spark subscriber -------", e);
         }
     }
+
+    static class RDDSortTransformer implements Function<JavaPairRDD<AirportKey, Integer>, JavaRDD<AirportKey>> {
+        @Override
+        public JavaRDD<AirportKey> call(JavaPairRDD<AirportKey, Integer> unsortedRDD) throws Exception {
+            return unsortedRDD.sortByKey(false).keys();
+        }
+    }
+
+//    static class RDDTransformer implements Function<JavaPairRDD<String, Integer>, JavaRDD<AirportKey>>{
+//
+//        @Override
+//        public JavaRDD<AirportKey> call(JavaPairRDD<String, Integer> pairRDD) throws Exception {
+//            return pairRDD.sor
+//        }
+//    }
+
+    static class PairConverter implements PairFunction<Tuple2<String, Integer>, AirportKey, Integer> {
+        @Override
+        public Tuple2<AirportKey, Integer> call(Tuple2<String, Integer> tuple2) throws Exception {
+            return new Tuple2(new AirportKey(tuple2._1(), tuple2._2()), 0);
+        }
+    }
+
+    static class Transformer implements Function<Tuple2<String, Integer>, AirportKey> {
+        @Override
+        public AirportKey call(Tuple2<String, Integer> entry) throws Exception {
+            return new AirportKey(entry._1(), entry._2());
+        }
+    }
+
 
     // List of incoming vals, currentVal, returnVal
     private static Function2<List<Integer>, Optional<Integer>, Optional<Integer>>
@@ -114,6 +146,81 @@ public final class G1Q1 {
         }
         return Optional.of(sum);
     };
+
+
+    static class AirportKey implements Comparable<AirportKey>, Serializable {
+
+        private String airportCode;
+        private Integer flightCount;
+
+
+        public String getAirportCode() {
+            return airportCode;
+        }
+
+        public Integer getFlightCount() {
+            return flightCount;
+        }
+
+        public void setFlightCount(Integer flightCount) {
+            this.flightCount = flightCount;
+        }
+
+        public void addFlightCount(Integer countToAdd) {
+            this.flightCount += countToAdd;
+        }
+
+
+        public AirportKey() {
+            airportCode = "";
+            flightCount = 0;
+        }
+
+        public AirportKey(String airportCode, Integer flightCount) {
+            this.airportCode = airportCode;
+            this.flightCount = flightCount;
+        }
+
+//
+//        @Override
+//        public int compare(Object that) {
+//            return (-1) * this.flightCount.compareTo(((AirportKey) that).getFlightCount());
+//        }
+
+        @Override
+        public int compareTo(AirportKey o) {
+            return this.flightCount.compareTo(o.getFlightCount()); // reverse sort
+        }
+
+        @Override
+        public String toString() {
+            return "airportCode='" + airportCode + '\'' +
+                    ", flightCount=" + flightCount;
+        }
+
+
+//        @Override
+//        public int compare(AirportKey o1, AirportKey o2) {
+//            return -1 * o1.getFlightCount().compareTo(o2.getFlightCount());
+//        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (!(o instanceof AirportKey)) return false;
+
+            AirportKey that = (AirportKey) o;
+
+            return getAirportCode().equals(that.getAirportCode());
+        }
+
+        @Override
+        public int hashCode() {
+            return getAirportCode().hashCode();
+        }
+
+
+    }
 
     static class RelevantIndex implements PairFunction<String, String, Integer> {
         int relIndex = 0;
