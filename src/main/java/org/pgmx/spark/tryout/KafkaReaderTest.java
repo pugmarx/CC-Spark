@@ -15,20 +15,19 @@
  * limitations under the License.
  */
 
-package org.apache.spark.examples.streaming;
+package org.pgmx.spark.tryout;
 
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.Optional;
 import org.apache.spark.api.java.function.Function2;
-import org.apache.spark.api.java.function.Function3;
 import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.streaming.Duration;
-import org.apache.spark.streaming.State;
-import org.apache.spark.streaming.StateSpec;
-import org.apache.spark.streaming.api.java.*;
+import org.apache.spark.streaming.api.java.JavaDStream;
+import org.apache.spark.streaming.api.java.JavaPairDStream;
+import org.apache.spark.streaming.api.java.JavaPairReceiverInputDStream;
+import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import org.apache.spark.streaming.kafka.KafkaUtils;
 import scala.Tuple2;
-
 
 import java.util.HashMap;
 import java.util.List;
