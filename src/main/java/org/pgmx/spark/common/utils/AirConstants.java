@@ -32,6 +32,7 @@ public class AirConstants {
     public static final String TEMP_DIR = "tmp";
     public static final String FLT_LEG_PROP = "flightLeg";
 
+    public static final String RAW_OUTPUT_DIR = "./output"; //FIXME
 
     public static final String ZK_HOST = "localhost:2181"; // FIXME
     public static final String IN_TOPIC = "testspark"; // FIXME

@@ -15,6 +15,7 @@ import org.apache.spark.streaming.api.java.JavaPairReceiverInputDStream;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import org.apache.spark.streaming.kafka.KafkaUtils;
 import org.pgmx.spark.common.utils.AirConstants;
+import org.pgmx.spark.common.utils.AirHelper;
 import scala.Tuple2;
 
 import java.io.Serializable;
@@ -75,14 +76,18 @@ public final class G1Q1 {
             // **** Print top 10 from sorted map ***
             sortedAirports.print(10);
 
-            // TODO persist(sortedAirports);
+            // Persist! //TODO restrict to 10?
+            AirHelper.persist(sortedAirports, G1Q1.class);
+
 
             jssc.start();
             jssc.awaitTermination();
+
         } catch (Exception e) {
             LOG.error("----- Error while running spark subscriber -------", e);
         }
     }
+
 
     /**
      * We used this transformer because sortByKey is only available here. Other (non-pair-based) options did
