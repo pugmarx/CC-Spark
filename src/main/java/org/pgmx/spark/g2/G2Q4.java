@@ -1,4 +1,4 @@
-package org.pgmx.spark.g1;
+package org.pgmx.spark.g2;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
@@ -13,7 +13,6 @@ import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.streaming.Duration;
 import org.apache.spark.streaming.api.java.JavaDStream;
 import org.apache.spark.streaming.api.java.JavaPairDStream;
-import org.apache.spark.streaming.api.java.JavaPairReceiverInputDStream;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import org.apache.spark.streaming.kafka.KafkaUtils;
 import org.pgmx.spark.common.utils.AirConstants;
@@ -25,31 +24,38 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.spark_project.guava.base.Preconditions.checkNotNull;
+
 /**
- * Group 1 Q2
+ * Group 2 Q1
  */
-public final class G1Q2 {
+public final class G2Q4 {
 
-    private static final Logger LOG = Logger.getLogger(G1Q2.class);
+    // FIXME *********************************************
+    // ****** Check Arrival Delay key
+    // FIXME *********************************************
 
-    //**************************************
-    //  FIXME change depDelay to ARR_DELAY
-    //*************************************
+    private static final Logger LOG = Logger.getLogger(G2Q4.class);
 
 
-    private G1Q2() {
+    private G2Q4() {
     }
 
 
     public static void main(String[] args) throws Exception {
 
         try {
+            checkNotNull(args[0], "No origin code specified, cannot continue");
+            checkNotNull(args[1], "No destination code specified, cannot continue");
 
-            SparkConf sparkConf = new SparkConf().setAppName("G1Q2").setMaster(AirConstants.MASTER_STRING);
+            SparkConf sparkConf = new SparkConf().setAppName("G2Q4").setMaster(AirConstants.MASTER_STRING);
             sparkConf.set("spark.streaming.concurrentJobs", AirConstants.STREAMING_JOB_COUNT);
 
             // Create the context with 2 seconds batch size
-            JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(AirConstants.FETCH_COUNT_INTERVAL));
+            JavaStreamingContext jssc = new JavaStreamingContext(sparkConf,
+                    new Duration(AirConstants.FETCH_COUNT_INTERVAL));
+
+            // Checkpoint -- needed for persistence (maintaining state)
             jssc.checkpoint(AirConstants.CHECKPOINT_DIR);
 
             int numThreads = Integer.parseInt(AirConstants.NUM_THREADS);
@@ -59,40 +65,44 @@ public final class G1Q2 {
                 topicMap.put(topic, numThreads);
             }
 
-
             // Pick the messages
-            JavaDStream<String> lines = KafkaUtils.createStream(jssc, AirConstants.ZK_HOST, AirConstants.IN_GROUP, topicMap).map(Tuple2::_2);
+            JavaDStream<String> lines = KafkaUtils.createStream(jssc, AirConstants.ZK_HOST, AirConstants.IN_GROUP,
+                    topicMap).map(Tuple2::_2);
 
+            // Filter by origin, dest code
+            JavaDStream<String> filteredLines = lines.filter(s ->
+                    StringUtils.equals(s.split(",")[AirConstants.ORIGIN_INDEX], args[0])
+                            && StringUtils.equals(s.split(",")[AirConstants.DEST_INDEX], args[1]));
 
-            JavaPairDStream<String, Integer> carrierArrDelay =
-                    lines.mapToPair(new CarrierArrivalDelay(AirConstants.UNIQUE_CARRIER_INDEX)); // FIXME ***** change index *******
+            // Get pairs from these filtered lines output is (ORG,DEST) -> ARR_DELAY
+            JavaPairDStream<String, Integer> carrierArrDelay = filteredLines.mapToPair(new OrgDestArrDelay());
 
-
-            // FIXME see if combineByKey can be used for G1Q1 as it has a mapSideCombine option
             // FIXME partitioner count is hard-coded
             JavaPairDStream<String, AvgCount> avgCounts =
-                    carrierArrDelay.combineByKey(createAcc, addAndCount, combine, new HashPartitioner(10), false);
+                    carrierArrDelay.combineByKey(createAcc, addAndCount, combine, new HashPartitioner(10),
+                            false);
 
             // FIXME debug
-            // avgCounts.print();
+            //avgCounts.print();
 
             // Store in a stateful ds
             JavaPairDStream<String, AvgCount> statefulMap = avgCounts.updateStateByKey(COMPUTE_RUNNING_AVG);
 
             // unsorted // FIXME for debug
-            statefulMap.print(10);
+            //statefulMap.print();
 
-            // Puts the juicy stuff in AirportKey, the Integer is useless -- just a placeholder
-            JavaPairDStream<FlightAvgArrivalKey, Integer> airports = statefulMap.mapToPair(new PairConverter());
+            // Puts the juicy stuff in OriginDestCarrierArrDelayKey, the Integer is useless -- just a placeholder
+            JavaPairDStream<OrgDestMeanArrDelayKey, Integer> airports =
+                    statefulMap.mapToPair(new PairConverter(args[0], args[1]));
 
             // Sorted airport list
-            JavaDStream<FlightAvgArrivalKey> sortedFlightAvgs = airports.transform(new RDDSortTransformer());
+            JavaDStream<OrgDestMeanArrDelayKey> sortedOrgDestArrAvgs = airports.transform(new RDDSortTransformer());
 
             // **** Print top 10 from sorted map ***
-            sortedFlightAvgs.print(10);
+            sortedOrgDestArrAvgs.print();
 
-            // Persist! //TODO restrict to 10?
-            AirHelper.persist(sortedFlightAvgs, G1Q2.class);
+            // Persist!
+            AirHelper.persist(sortedOrgDestArrAvgs, G2Q4.class);
 
             jssc.start();
             jssc.awaitTermination();
@@ -101,7 +111,6 @@ public final class G1Q2 {
             LOG.error("----- Error while running spark subscriber -------", e);
         }
     }
-
 
     public static class AvgCount implements Serializable {
         public AvgCount(int total, int num) {
@@ -123,38 +132,32 @@ public final class G1Q2 {
     }
 
     // FIXME num is init to 1 -- should be OK?
-    static Function<Integer, AvgCount> createAcc = x -> {
-        //public AvgCount call(Integer x) {
-        return new AvgCount(x, 1);
-        //}
-    };
+    static Function<Integer, AvgCount> createAcc = x -> new AvgCount(x, 1);
 
     static Function2<AvgCount, Integer, AvgCount> addAndCount =
             (a, x) -> {
-                //  public AvgCount call(AvgCount a, Integer x) {
                 a.total_ += x;
                 a.num_ += 1;
                 return a;
-                //   }
             };
 
     static Function2<AvgCount, AvgCount, AvgCount> combine =
             (a, b) -> {
-                //public AvgCount call(AvgCount a, AvgCount b) {
                 a.total_ += b.total_;
                 a.num_ += b.num_;
                 return a;
-                //}
             };
+
 
     /**
      * We used this transformer because sortByKey is only available here. Other (non-pair-based) options did
      * not have a built-in option to sort by keys
      */
-    static class RDDSortTransformer implements Function<JavaPairRDD<FlightAvgArrivalKey, Integer>,
-            JavaRDD<FlightAvgArrivalKey>> {
+    static class RDDSortTransformer implements Function<JavaPairRDD<OrgDestMeanArrDelayKey, Integer>,
+            JavaRDD<OrgDestMeanArrDelayKey>> {
         @Override
-        public JavaRDD<FlightAvgArrivalKey> call(JavaPairRDD<FlightAvgArrivalKey, Integer> unsortedRDD)
+        public JavaRDD<OrgDestMeanArrDelayKey> call(JavaPairRDD<OrgDestMeanArrDelayKey, Integer>
+                                                            unsortedRDD)
                 throws Exception {
             return unsortedRDD.sortByKey().keys(); // ASC sort
         }
@@ -164,11 +167,19 @@ public final class G1Q2 {
     /**
      * Used to prepare a CustomKey (@AirportKey) based RDD out of the "raw" (String,Integer) RDD
      */
-    static class PairConverter implements PairFunction<Tuple2<String, AvgCount>, FlightAvgArrivalKey, Integer> {
+    static class PairConverter implements PairFunction<Tuple2<String, AvgCount>, OrgDestMeanArrDelayKey,
+            Integer> {
+        String origin;
+        String dest;
+
+        public PairConverter(String org, String dest) {
+            this.origin = org;
+            this.dest = dest;
+        }
+
         @Override
-        public Tuple2<FlightAvgArrivalKey, Integer> call(Tuple2<String, AvgCount> tuple2) throws Exception {
-            //return new Tuple2(new FlightAvgArrivalKey(tuple2._1(), tuple2._2()), 0);
-            return new Tuple2(new FlightAvgArrivalKey(tuple2._1(), tuple2._2().avg()), 0);
+        public Tuple2<OrgDestMeanArrDelayKey, Integer> call(Tuple2<String, AvgCount> tuple2) throws Exception {
+            return new Tuple2(new OrgDestMeanArrDelayKey(origin, dest, tuple2._2().avg()), 0); // ignored key
         }
     }
 
@@ -187,82 +198,70 @@ public final class G1Q2 {
     };
 
 
-    static class FlightAvgArrivalKey implements Comparable<FlightAvgArrivalKey>, Serializable {
+    static class OrgDestMeanArrDelayKey implements Comparable<OrgDestMeanArrDelayKey>, Serializable {
+        private String origin;
+        private String destination;
+        private String airline;
+        private Float avgArrivalDelay;
 
-        private String fltCode;
-        private Float avg;
 
-
-        public String getFltCode() {
-            return fltCode;
+        public String getDestination() {
+            return destination;
         }
 
-        public Float getAvg() {
-            return avg;
+        public OrgDestMeanArrDelayKey(String origin, String destination, Float avgArrDelay) {
+            this.origin = origin;
+            this.destination = destination;
+            this.avgArrivalDelay = avgArrDelay;
         }
-
-
-        public FlightAvgArrivalKey() {
-            fltCode = "";
-            avg = 0.0f;
-        }
-
-        public FlightAvgArrivalKey(String airportCode, Float avgArrivalDelay) {
-            this.fltCode = airportCode;
-            this.avg = avgArrivalDelay;
-        }
-
 
         @Override
-        public int compareTo(FlightAvgArrivalKey o) {
-            return this.avg.compareTo(o.avg); // reverse sort
+        public int compareTo(OrgDestMeanArrDelayKey o) {
+            return this.avgArrivalDelay.compareTo(o.avgArrivalDelay);
         }
 
         @Override
         public String toString() {
-            return fltCode + "," + avg;
+            return origin + "," + destination + "," + avgArrivalDelay;
         }
 
         @Override
         public boolean equals(Object o) {
             if (this == o) return true;
-            if (!(o instanceof FlightAvgArrivalKey)) return false;
+            if (!(o instanceof OrgDestMeanArrDelayKey)) return false;
 
-            FlightAvgArrivalKey that = (FlightAvgArrivalKey) o;
+            OrgDestMeanArrDelayKey that = (OrgDestMeanArrDelayKey) o;
 
-            return getFltCode().equals(that.getFltCode());
+            return getDestination().equals(that.getDestination());
         }
 
         @Override
         public int hashCode() {
-            return getFltCode().hashCode();
+            return getDestination().hashCode();
         }
     }
 
-    public static class CarrierArrivalDelay implements PairFunction<String, String, Integer> {
-        int relIndex = 0;
 
-        @SuppressWarnings("unused")
-        public CarrierArrivalDelay() {
-        }
+    public static class OrgDestArrDelay implements PairFunction<String, String, Integer> {
+        public Tuple2<String, Integer> apply(String s) {
+            String[] arr = s.split(",");
+            String orgDestKey = String.format("%s,%s", arr[AirConstants.ORIGIN_INDEX], arr[AirConstants.DEST_INDEX]);
 
-        public CarrierArrivalDelay(int index) {
-            relIndex = index;
-        }
-
-        public Tuple2<String, Integer> apply(String line) {
-            String[] arr = line.split(",");
+            //FIXME fix this index
             Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.DEP_DELAY_INDEX]) ?
                     0 : Float.valueOf(arr[AirConstants.DEP_DELAY_INDEX]).intValue();
-            return new Tuple2(arr[relIndex], arrDelay); //FIXME check index
+            return new Tuple2(orgDestKey, arrDelay);
         }
 
         @Override
         public Tuple2<String, Integer> call(String s) throws Exception {
             String[] arr = s.split(",");
+            String orgDestKey = String.format("%s,%s", arr[AirConstants.ORIGIN_INDEX], arr[AirConstants.DEST_INDEX]);
+
+            //FIXME fix this index
             Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.DEP_DELAY_INDEX]) ?
                     0 : Float.valueOf(arr[AirConstants.DEP_DELAY_INDEX]).intValue();
-            return new Tuple2(arr[relIndex], arrDelay); //FIXME check index
+            return new Tuple2(orgDestKey, arrDelay);
         }
     }
 }
