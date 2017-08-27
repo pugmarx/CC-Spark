@@ -23,10 +23,10 @@ public class AirConstants {
     public static final int ORIGIN_INDEX = 5;
     public static final int DEST_INDEX = 6;
     public static final int DEP_TIME_INDEX = 7;
-    public static final int ARR_TIME_INDEX = 9;
-    public static final int DEP_DELAY_INDEX = 8;
+    public static final int ARR_TIME_INDEX = 8;
+    public static final int DEP_DELAY_INDEX = 9;
     public static final int ARR_DELAY_INDEX = 10;
-    //public static final int CANCELLED_INDEX = 11;
+    public static final int CANCELLED_INDEX = 11;
 
     //********* misc props
     public static final String TEMP_DIR = "tmp";
