@@ -19,7 +19,7 @@ public class AirConstants {
     public static final int DAY_OF_WEEK_INDEX = 1;
     public static final int FLT_DATE_INDEX = 2;
     public static final int UNIQUE_CARRIER_INDEX = 3;
-    public static final int FLIGHT_NUM_INDEX = 4;
+    public static final int FLT_NUM_INDEX = 4;
     public static final int ORIGIN_INDEX = 5;
     public static final int DEST_INDEX = 6;
     public static final int DEP_TIME_INDEX = 7;
