@@ -30,17 +30,10 @@ import static org.spark_project.guava.base.Preconditions.checkNotNull;
  * Group 2 Q1
  */
 public final class G2Q4 {
-
-    // FIXME *********************************************
-    // ****** Check Arrival Delay key
-    // FIXME *********************************************
-
     private static final Logger LOG = Logger.getLogger(G2Q4.class);
-
 
     private G2Q4() {
     }
-
 
     public static void main(String[] args) throws Exception {
 
@@ -246,10 +239,8 @@ public final class G2Q4 {
         public Tuple2<String, Integer> apply(String s) {
             String[] arr = s.split(",");
             String orgDestKey = String.format("%s,%s", arr[AirConstants.ORIGIN_INDEX], arr[AirConstants.DEST_INDEX]);
-
-            //FIXME fix this index
-            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.DEP_DELAY_INDEX]) ?
-                    0 : Float.valueOf(arr[AirConstants.DEP_DELAY_INDEX]).intValue();
+            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.ARR_DELAY_INDEX]) ?
+                    0 : Float.valueOf(arr[AirConstants.ARR_DELAY_INDEX]).intValue();
             return new Tuple2(orgDestKey, arrDelay);
         }
 
@@ -257,10 +248,8 @@ public final class G2Q4 {
         public Tuple2<String, Integer> call(String s) throws Exception {
             String[] arr = s.split(",");
             String orgDestKey = String.format("%s,%s", arr[AirConstants.ORIGIN_INDEX], arr[AirConstants.DEST_INDEX]);
-
-            //FIXME fix this index
-            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.DEP_DELAY_INDEX]) ?
-                    0 : Float.valueOf(arr[AirConstants.DEP_DELAY_INDEX]).intValue();
+            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.ARR_DELAY_INDEX]) ?
+                    0 : Float.valueOf(arr[AirConstants.ARR_DELAY_INDEX]).intValue();
             return new Tuple2(orgDestKey, arrDelay);
         }
     }

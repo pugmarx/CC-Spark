@@ -30,13 +30,7 @@ import static org.spark_project.guava.base.Preconditions.checkNotNull;
  * Group 2 Q1
  */
 public final class G2Q3 {
-
-    // FIXME *********************************************
-    // ****** Check Arrival Delay key
-    // FIXME *********************************************
-
     private static final Logger LOG = Logger.getLogger(G2Q3.class);
-
 
     private G2Q3() {
     }
@@ -179,7 +173,6 @@ public final class G2Q3 {
 
         @Override
         public Tuple2<OriginDestCarrierArrDelayKey, Integer> call(Tuple2<String, AvgCount> tuple2) throws Exception {
-            //return new Tuple2(new FlightAvgArrivalKey(tuple2._1(), tuple2._2()), 0);
             return new Tuple2(new OriginDestCarrierArrDelayKey(origin, dest, tuple2._1(), tuple2._2().avg()), 0);
         }
     }
@@ -231,9 +224,7 @@ public final class G2Q3 {
         public boolean equals(Object o) {
             if (this == o) return true;
             if (!(o instanceof OriginDestCarrierArrDelayKey)) return false;
-
             OriginDestCarrierArrDelayKey that = (OriginDestCarrierArrDelayKey) o;
-
             return getDestination().equals(that.getDestination());
         }
 
@@ -243,23 +234,22 @@ public final class G2Q3 {
         }
     }
 
-
     public static class AirlineArrivalDelay implements PairFunction<String, String, Integer> {
 
         public Tuple2<String, Integer> apply(String s) {
             String[] arr = s.split(",");
-            //FIXME fix this index
-            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.DEP_DELAY_INDEX]) ?
-                    0 : Float.valueOf(arr[AirConstants.DEP_DELAY_INDEX]).intValue();
+
+            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.ARR_DELAY_INDEX]) ?
+                    0 : Float.valueOf(arr[AirConstants.ARR_DELAY_INDEX]).intValue();
             return new Tuple2(arr[AirConstants.UNIQUE_CARRIER_INDEX], arrDelay);
         }
 
         @Override
         public Tuple2<String, Integer> call(String s) throws Exception {
             String[] arr = s.split(",");
-            //FIXME fix this index
-            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.DEP_DELAY_INDEX]) ?
-                    0 : Float.valueOf(arr[AirConstants.DEP_DELAY_INDEX]).intValue();
+
+            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.ARR_DELAY_INDEX]) ?
+                    0 : Float.valueOf(arr[AirConstants.ARR_DELAY_INDEX]).intValue();
             return new Tuple2(arr[AirConstants.UNIQUE_CARRIER_INDEX], arrDelay);
         }
     }

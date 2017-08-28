@@ -26,7 +26,7 @@ public class Validator implements Serializable {
         try {
             leg1Date = sdf.parse(depDate);
             cal.setTime(leg1Date);
-            cal.setFirstDayOfWeek(Calendar.MONDAY); //FIXME check this
+            cal.setFirstDayOfWeek(Calendar.MONDAY);
 
             cal.add(Calendar.DAY_OF_WEEK, 2);
             leg2Date = cal.getTime(); // Estimated leg2 date

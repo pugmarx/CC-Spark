@@ -169,7 +169,6 @@ public final class G2Q2 {
 
         @Override
         public Tuple2<OriginDestDepDelayKey, Integer> call(Tuple2<String, AvgCount> tuple2) throws Exception {
-            //return new Tuple2(new FlightAvgArrivalKey(tuple2._1(), tuple2._2()), 0);
             return new Tuple2(new OriginDestDepDelayKey(origin, tuple2._1(), tuple2._2().avg()), 0);
         }
     }

@@ -30,17 +30,14 @@ import static org.spark_project.guava.base.Preconditions.checkNotNull;
  * Group 3 Q2
  */
 public final class G3Q2 {
-
     // FIXME ************************************************
     // ****** 2. Change topic name as this is for 2008 data
     // FIXME ************************************************
 
     private static final Logger LOG = Logger.getLogger(G3Q2.class);
 
-
     private G3Q2() {
     }
-
 
     public static void main(String[] args) throws Exception {
 
@@ -304,14 +301,6 @@ public final class G3Q2 {
             return this.avgCount.avg().compareTo(that.avgCount.avg());
         }
 
-        public FlightLegKey(String origin, String dest, String fltDate, String airline, String fltNum) {
-            this.origin = origin;
-            this.dest = dest;
-            this.fltDate = fltDate;
-            this.airline = airline;
-            this.fltNum = fltNum;
-            //this.depTime = depTime;
-        }
 
         public FlightLegKey(String flightLeg, String origin, String dest, String fltDate, String airline,
                             String fltNum, String depTime) {

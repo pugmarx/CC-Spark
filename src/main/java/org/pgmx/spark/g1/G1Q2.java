@@ -32,11 +32,6 @@ public final class G1Q2 {
 
     private static final Logger LOG = Logger.getLogger(G1Q2.class);
 
-    //**************************************
-    //  FIXME change depDelay to ARR_DELAY
-    //*************************************
-
-
     private G1Q2() {
     }
 
@@ -65,7 +60,7 @@ public final class G1Q2 {
 
 
             JavaPairDStream<String, Integer> carrierArrDelay =
-                    lines.mapToPair(new CarrierArrivalDelay(AirConstants.UNIQUE_CARRIER_INDEX)); // FIXME ***** change index *******
+                    lines.mapToPair(new CarrierArrivalDelay(AirConstants.UNIQUE_CARRIER_INDEX));
 
 
             // FIXME see if combineByKey can be used for G1Q1 as it has a mapSideCombine option
@@ -79,8 +74,8 @@ public final class G1Q2 {
             // Store in a stateful ds
             JavaPairDStream<String, AvgCount> statefulMap = avgCounts.updateStateByKey(COMPUTE_RUNNING_AVG);
 
-            // unsorted // FIXME for debug
-            statefulMap.print(10);
+            // unsorted
+            // statefulMap.print(10);
 
             // Puts the juicy stuff in AirportKey, the Integer is useless -- just a placeholder
             JavaPairDStream<FlightAvgArrivalKey, Integer> airports = statefulMap.mapToPair(new PairConverter());
@@ -122,29 +117,20 @@ public final class G1Q2 {
         }
     }
 
-    // FIXME num is init to 1 -- should be OK?
-    static Function<Integer, AvgCount> createAcc = x -> {
-        //public AvgCount call(Integer x) {
-        return new AvgCount(x, 1);
-        //}
-    };
+    static Function<Integer, AvgCount> createAcc = x -> (new AvgCount(x, 1));
 
     static Function2<AvgCount, Integer, AvgCount> addAndCount =
             (a, x) -> {
-                //  public AvgCount call(AvgCount a, Integer x) {
                 a.total_ += x;
                 a.num_ += 1;
                 return a;
-                //   }
             };
 
     static Function2<AvgCount, AvgCount, AvgCount> combine =
             (a, b) -> {
-                //public AvgCount call(AvgCount a, AvgCount b) {
                 a.total_ += b.total_;
                 a.num_ += b.num_;
                 return a;
-                //}
             };
 
     /**
@@ -188,7 +174,6 @@ public final class G1Q2 {
 
 
     static class FlightAvgArrivalKey implements Comparable<FlightAvgArrivalKey>, Serializable {
-
         private String fltCode;
         private Float avg;
 
@@ -197,21 +182,10 @@ public final class G1Q2 {
             return fltCode;
         }
 
-        public Float getAvg() {
-            return avg;
-        }
-
-
-        public FlightAvgArrivalKey() {
-            fltCode = "";
-            avg = 0.0f;
-        }
-
         public FlightAvgArrivalKey(String airportCode, Float avgArrivalDelay) {
             this.fltCode = airportCode;
             this.avg = avgArrivalDelay;
         }
-
 
         @Override
         public int compareTo(FlightAvgArrivalKey o) {
@@ -252,17 +226,17 @@ public final class G1Q2 {
 
         public Tuple2<String, Integer> apply(String line) {
             String[] arr = line.split(",");
-            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.DEP_DELAY_INDEX]) ?
-                    0 : Float.valueOf(arr[AirConstants.DEP_DELAY_INDEX]).intValue();
-            return new Tuple2(arr[relIndex], arrDelay); //FIXME check index
+            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.ARR_DELAY_INDEX]) ?
+                    0 : Float.valueOf(arr[AirConstants.ARR_DELAY_INDEX]).intValue();
+            return new Tuple2(arr[relIndex], arrDelay);
         }
 
         @Override
         public Tuple2<String, Integer> call(String s) throws Exception {
             String[] arr = s.split(",");
-            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.DEP_DELAY_INDEX]) ?
-                    0 : Float.valueOf(arr[AirConstants.DEP_DELAY_INDEX]).intValue();
-            return new Tuple2(arr[relIndex], arrDelay); //FIXME check index
+            Integer arrDelay = StringUtils.isEmpty(arr[AirConstants.ARR_DELAY_INDEX]) ?
+                    0 : Float.valueOf(arr[AirConstants.ARR_DELAY_INDEX]).intValue();
+            return new Tuple2(arr[relIndex], arrDelay);
         }
     }
 }
