@@ -43,7 +43,7 @@ public final class G2Q2 {
         try {
             checkNotNull(args[0], "No origin code specified, cannot continue");
 
-            SparkConf sparkConf = new SparkConf().setAppName("G2Q2").setMaster(AirConstants.MASTER_STRING);
+            SparkConf sparkConf = new SparkConf().setAppName("G2Q2");
             sparkConf.set("spark.streaming.concurrentJobs", AirConstants.STREAMING_JOB_COUNT);
 
             // Create the context with 2 seconds batch size

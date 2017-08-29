@@ -36,7 +36,7 @@ public final class G1Q1 {
     public static void main(String[] args) throws Exception {
 
         try {
-            SparkConf sparkConf = new SparkConf().setAppName("G1Q1").setMaster(AirConstants.MASTER_STRING);
+            SparkConf sparkConf = new SparkConf().setAppName("G1Q1");
             sparkConf.set("spark.streaming.concurrentJobs", AirConstants.STREAMING_JOB_COUNT);
 
             // Create the context with 2 seconds batch size

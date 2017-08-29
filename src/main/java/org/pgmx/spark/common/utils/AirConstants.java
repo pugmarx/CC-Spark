@@ -33,19 +33,17 @@ public class AirConstants {
     public static final String FLT_LEG_PROP = "flightLeg";
 
     public static final String RAW_OUTPUT_DIR = "./output"; //FIXME
-
     public static final String ZK_HOST = "localhost:2181"; // FIXME
     public static final String IN_TOPIC = "testspark"; // FIXME
 
-
-    public static final String IN_GROUP = "spark_" + UUID.randomUUID(); //FIXME
+    public static final String IN_GROUP = "spark_" + UUID.randomUUID(); // FIXME ***** to track!
     public static final String NUM_THREADS = "1";
 
     public static final String CHECKPOINT_DIR = "/tmp/spark_checkpoints";
 
     public static final String STREAMING_JOB_COUNT = "10";
     public static final int FETCH_COUNT_INTERVAL = 20000; // FIXME
-    public static final String MASTER_STRING = "local[*]"; // FIXME
+    //public static final String MASTER_STRING = "local[*]"; // FIXME
 
 
 }

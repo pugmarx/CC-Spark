@@ -52,7 +52,7 @@ public final class G3Q2 {
             String dest = args[2];
             String startDate = args[3];
 
-            SparkConf sparkConf = new SparkConf().setAppName("G3Q2").setMaster(MASTER_STRING);
+            SparkConf sparkConf = new SparkConf().setAppName("G3Q2");
             sparkConf.set("spark.streaming.concurrentJobs", STREAMING_JOB_COUNT);
 
             // Create the context with 2 seconds batch size
