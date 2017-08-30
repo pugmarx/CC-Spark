@@ -52,26 +52,29 @@ public final class G3Q2 {
             String dest = args[2];
             String startDate = args[3];
 
+            String zkHost = args.length > 4 ? args[4] : ZK_HOST;
+            String kafkaTopic = args.length > 5 ? args[5] : IN_TOPIC;
+            String consGroup = args.length > 6 ? args[6] : CONSUMER_GROUP;
+            int fetcherThreads = args.length > 7 ? Integer.valueOf(args[7]) : NUM_THREADS;
+            int streamJobs = args.length > 8 ? Integer.valueOf(args[8]) : STREAMING_JOB_COUNT;
+            int fetchIntervalMs = args.length > 9 ? Integer.valueOf(args[9]) : FETCH_COUNT_INTERVAL;
+
             SparkConf sparkConf = new SparkConf().setAppName("G3Q2");
-            sparkConf.set("spark.streaming.concurrentJobs", STREAMING_JOB_COUNT);
+            sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
 
             // Create the context with 2 seconds batch size
-            JavaStreamingContext jssc = new JavaStreamingContext(sparkConf,
-                    new Duration(FETCH_COUNT_INTERVAL));
-
-            // Checkpoint -- needed for persistence (maintaining state)
+            JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(fetchIntervalMs));
             jssc.checkpoint(CHECKPOINT_DIR);
 
-            int numThreads = Integer.parseInt(NUM_THREADS);
+            //int numThreads = Integer.parseInt(fetcherThreads);
             Map<String, Integer> topicMap = new HashMap<>();
-            String[] topics = IN_TOPIC.split(",");
+            String[] topics = kafkaTopic.split(",");
             for (String topic : topics) {
-                topicMap.put(topic, numThreads);
+                topicMap.put(topic, fetcherThreads);
             }
 
             // Pick the messages
-            JavaDStream<String> lines = KafkaUtils.createStream(jssc, ZK_HOST, IN_GROUP,
-                    topicMap).map(Tuple2::_2);
+            JavaDStream<String> lines = KafkaUtils.createStream(jssc, zkHost, consGroup, topicMap).map(Tuple2::_2);
 
             // Leg1
             processLeg1(origin, transit, startDate, lines);

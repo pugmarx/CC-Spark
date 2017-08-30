@@ -42,24 +42,29 @@ public final class G2Q3 {
             checkNotNull(args[0], "No origin code specified, cannot continue");
             checkNotNull(args[1], "No destination code specified, cannot continue");
 
+            String zkHost = args.length > 2 ? args[2] : AirConstants.ZK_HOST;
+            String kafkaTopic = args.length > 3 ? args[3] : AirConstants.IN_TOPIC;
+            String consGroup = args.length > 4 ? args[4] : AirConstants.CONSUMER_GROUP;
+            int fetcherThreads = args.length > 5 ? Integer.valueOf(args[5]) : AirConstants.NUM_THREADS;
+            int streamJobs = args.length > 6 ? Integer.valueOf(args[6]) : AirConstants.STREAMING_JOB_COUNT;
+            int fetchIntervalMs = args.length > 7 ? Integer.valueOf(args[7]) : AirConstants.FETCH_COUNT_INTERVAL;
+
             SparkConf sparkConf = new SparkConf().setAppName("G2Q3");
-            sparkConf.set("spark.streaming.concurrentJobs", AirConstants.STREAMING_JOB_COUNT);
+            sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
 
             // Create the context with 2 seconds batch size
-            JavaStreamingContext jssc = new JavaStreamingContext(sparkConf,
-                    new Duration(AirConstants.FETCH_COUNT_INTERVAL));
+            JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(fetchIntervalMs));
             jssc.checkpoint(AirConstants.CHECKPOINT_DIR);
 
-            int numThreads = Integer.parseInt(AirConstants.NUM_THREADS);
+            //int numThreads = Integer.parseInt(fetcherThreads);
             Map<String, Integer> topicMap = new HashMap<>();
-            String[] topics = AirConstants.IN_TOPIC.split(",");
+            String[] topics = kafkaTopic.split(",");
             for (String topic : topics) {
-                topicMap.put(topic, numThreads);
+                topicMap.put(topic, fetcherThreads);
             }
 
             // Pick the messages
-            JavaDStream<String> lines = KafkaUtils.createStream(jssc, AirConstants.ZK_HOST, AirConstants.IN_GROUP,
-                    topicMap).map(Tuple2::_2);
+            JavaDStream<String> lines = KafkaUtils.createStream(jssc, zkHost, consGroup, topicMap).map(Tuple2::_2);
 
             // Filter by origin code
             JavaDStream<String> filteredLines = lines.filter(s ->

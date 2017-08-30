@@ -36,22 +36,30 @@ public final class G1Q1 {
     public static void main(String[] args) throws Exception {
 
         try {
+
+            String zkHost = args.length > 0 ? args[0] : AirConstants.ZK_HOST;
+            String kafkaTopic = args.length > 1 ? args[1] : AirConstants.IN_TOPIC;
+            String consGroup = args.length > 2 ? args[2] : AirConstants.CONSUMER_GROUP;
+            int fetcherThreads = args.length > 3 ? Integer.valueOf(args[3]) : AirConstants.NUM_THREADS;
+            int streamJobs = args.length > 4 ? Integer.valueOf(args[4]) : AirConstants.STREAMING_JOB_COUNT;
+            int fetchIntervalMs = args.length > 5 ? Integer.valueOf(args[5]) : AirConstants.FETCH_COUNT_INTERVAL;
+
             SparkConf sparkConf = new SparkConf().setAppName("G1Q1");
-            sparkConf.set("spark.streaming.concurrentJobs", AirConstants.STREAMING_JOB_COUNT);
+            sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
 
             // Create the context with 2 seconds batch size
-            JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(AirConstants.FETCH_COUNT_INTERVAL));
+            JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(fetchIntervalMs));
             jssc.checkpoint(AirConstants.CHECKPOINT_DIR);
 
-            int numThreads = Integer.parseInt(AirConstants.NUM_THREADS);
+            //int numThreads = Integer.parseInt(AirConstants.NUM_THREADS);
             Map<String, Integer> topicMap = new HashMap<>();
-            String[] topics = AirConstants.IN_TOPIC.split(",");
+            String[] topics = kafkaTopic.split(",");
             for (String topic : topics) {
-                topicMap.put(topic, numThreads);
+                topicMap.put(topic, fetcherThreads);
             }
 
             JavaPairReceiverInputDStream<String, String> messages =
-                    KafkaUtils.createStream(jssc, AirConstants.ZK_HOST, AirConstants.IN_GROUP, topicMap);
+                    KafkaUtils.createStream(jssc, zkHost, consGroup, topicMap);
 
             // Pick the messages
             JavaDStream<String> lines = messages.map(Tuple2::_2);
