@@ -16,15 +16,15 @@ public class AirConstants {
 
     //******** indices
     public static final int YEAR_INDEX = 0;
-    public static final int DAY_OF_WEEK_INDEX = 1;
-    public static final int FLT_DATE_INDEX = 2;
-    public static final int UNIQUE_CARRIER_INDEX = 3;
-    public static final int FLT_NUM_INDEX = 4;
-    public static final int ORIGIN_INDEX = 5;
-    public static final int DEST_INDEX = 6;
-    public static final int DEP_TIME_INDEX = 7;
-    public static final int ARR_TIME_INDEX = 8;
-    public static final int DEP_DELAY_INDEX = 9;
+    public static final int FLT_DATE_INDEX = 1;
+    public static final int DEP_TIME_INDEX = 2;
+    public static final int DAY_OF_WEEK_INDEX = 3;
+    public static final int UNIQUE_CARRIER_INDEX = 4;
+    public static final int FLT_NUM_INDEX = 5;
+    public static final int ORIGIN_INDEX = 6;
+    public static final int DEST_INDEX = 7;
+    public static final int DEP_DELAY_INDEX = 8;
+    public static final int ARR_TIME_INDEX = 9;
     public static final int ARR_DELAY_INDEX = 10;
     public static final int CANCELLED_INDEX = 11;
 
