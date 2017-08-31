@@ -43,6 +43,8 @@ public class AirConstants {
 
     public static final int STREAMING_JOB_COUNT = 10;
     public static final int FETCH_COUNT_INTERVAL = 20000; // FIXME
+    public static final String KAFKA_OFFSET_LARGEST = "largest";
+    public static final String KAFKA_OFFSET_SMALLEST = "smallest";
     //public static final String MASTER_STRING = "local[*]"; // FIXME
 
 

@@ -1,5 +1,6 @@
 package org.pgmx.spark.g3;
 
+import kafka.serializer.StringDecoder;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.apache.spark.HashPartitioner;
@@ -13,15 +14,14 @@ import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.streaming.Duration;
 import org.apache.spark.streaming.api.java.JavaDStream;
 import org.apache.spark.streaming.api.java.JavaPairDStream;
+import org.apache.spark.streaming.api.java.JavaPairInputDStream;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import org.apache.spark.streaming.kafka.KafkaUtils;
 import org.pgmx.spark.common.utils.AirHelper;
 import scala.Tuple2;
 
 import java.io.Serializable;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static org.pgmx.spark.common.utils.AirConstants.*;
 import static org.spark_project.guava.base.Preconditions.checkNotNull;
@@ -54,10 +54,10 @@ public final class G3Q2 {
 
             String zkHost = args.length > 4 ? args[4] : ZK_HOST;
             String kafkaTopic = args.length > 5 ? args[5] : IN_TOPIC;
-            String consGroup = args.length > 6 ? args[6] : CONSUMER_GROUP;
-            int fetcherThreads = args.length > 7 ? Integer.valueOf(args[7]) : NUM_THREADS;
-            int streamJobs = args.length > 8 ? Integer.valueOf(args[8]) : STREAMING_JOB_COUNT;
-            int fetchIntervalMs = args.length > 9 ? Integer.valueOf(args[9]) : FETCH_COUNT_INTERVAL;
+            int streamJobs = args.length > 6 ? Integer.valueOf(args[6]) : STREAMING_JOB_COUNT;
+            int fetchIntervalMs = args.length > 7 ? Integer.valueOf(args[7]) : FETCH_COUNT_INTERVAL;
+            String kafkaOffset = args.length > 8 && args[8].equalsIgnoreCase("Y") ?
+                    KAFKA_OFFSET_SMALLEST : KAFKA_OFFSET_LARGEST;
 
             SparkConf sparkConf = new SparkConf().setAppName("G3Q2");
             sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
@@ -66,15 +66,25 @@ public final class G3Q2 {
             JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(fetchIntervalMs));
             jssc.checkpoint(CHECKPOINT_DIR);
 
-            //int numThreads = Integer.parseInt(fetcherThreads);
-            Map<String, Integer> topicMap = new HashMap<>();
-            String[] topics = kafkaTopic.split(",");
-            for (String topic : topics) {
-                topicMap.put(topic, fetcherThreads);
-            }
+            Set<String> topicsSet = new HashSet<>(Arrays.asList(kafkaTopic.split(",")));
+
+            Map<String, String> kafkaParams = new HashMap<>();
+            kafkaParams.put("metadata.broker.list", zkHost);
+            kafkaParams.put("auto.offset.reset", kafkaOffset);
+
+            // Need to pass kafkaParams
+            JavaPairInputDStream<String, String> messages = KafkaUtils.createDirectStream(
+                    jssc,
+                    String.class,
+                    String.class,
+                    StringDecoder.class,
+                    StringDecoder.class,
+                    kafkaParams,
+                    topicsSet
+            );
 
             // Pick the messages
-            JavaDStream<String> lines = KafkaUtils.createStream(jssc, zkHost, consGroup, topicMap).map(Tuple2::_2);
+            JavaDStream<String> lines = messages.map(Tuple2::_2);
 
             // Leg1
             processLeg1(origin, transit, startDate, lines);

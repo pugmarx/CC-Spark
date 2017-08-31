@@ -1,5 +1,6 @@
 package org.pgmx.spark.g1;
 
+import kafka.serializer.StringDecoder;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.apache.spark.HashPartitioner;
@@ -13,6 +14,7 @@ import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.streaming.Duration;
 import org.apache.spark.streaming.api.java.JavaDStream;
 import org.apache.spark.streaming.api.java.JavaPairDStream;
+import org.apache.spark.streaming.api.java.JavaPairInputDStream;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import org.apache.spark.streaming.kafka.KafkaUtils;
 import org.pgmx.spark.common.utils.AirConstants;
@@ -20,9 +22,7 @@ import org.pgmx.spark.common.utils.AirHelper;
 import scala.Tuple2;
 
 import java.io.Serializable;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Group 1 Q2
@@ -41,10 +41,10 @@ public final class G1Q2 {
 
             String zkHost = args.length > 0 ? args[0] : AirConstants.ZK_HOST;
             String kafkaTopic = args.length > 1 ? args[1] : AirConstants.IN_TOPIC;
-            String consGroup = args.length > 2 ? args[2] : AirConstants.CONSUMER_GROUP;
-            int fetcherThreads = args.length > 3 ? Integer.valueOf(args[3]) : AirConstants.NUM_THREADS;
-            int streamJobs = args.length > 4 ? Integer.valueOf(args[4]) : AirConstants.STREAMING_JOB_COUNT;
-            int fetchIntervalMs = args.length > 5 ? Integer.valueOf(args[5]) : AirConstants.FETCH_COUNT_INTERVAL;
+            int streamJobs = args.length > 2 ? Integer.valueOf(args[2]) : AirConstants.STREAMING_JOB_COUNT;
+            int fetchIntervalMs = args.length > 3 ? Integer.valueOf(args[3]) : AirConstants.FETCH_COUNT_INTERVAL;
+            String kafkaOffset = args.length > 4 && args[4].equalsIgnoreCase("Y") ?
+                    AirConstants.KAFKA_OFFSET_SMALLEST : AirConstants.KAFKA_OFFSET_LARGEST;
 
             SparkConf sparkConf = new SparkConf().setAppName("G1Q2");
             sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
@@ -53,26 +53,41 @@ public final class G1Q2 {
             JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(fetchIntervalMs));
             jssc.checkpoint(AirConstants.CHECKPOINT_DIR);
 
-            //int numThreads = Integer.parseInt(AirConstants.NUM_THREADS);
-            Map<String, Integer> topicMap = new HashMap<>();
-            String[] topics = kafkaTopic.split(",");
-            for (String topic : topics) {
-                topicMap.put(topic, fetcherThreads);
-            }
+            Set<String> topicsSet = new HashSet<>(Arrays.asList(kafkaTopic.split(",")));
 
+            Map<String, String> kafkaParams = new HashMap<>();
+            kafkaParams.put("metadata.broker.list", zkHost);
+            kafkaParams.put("auto.offset.reset", kafkaOffset);
+
+            // JavaPairReceiverInputDStream<String, String> messages =
+            //         KafkaUtils.createStream(jssc, zkHostOrBrokers, consGroup, topicMap);
+
+            // Need to pass kafkaParams
+            JavaPairInputDStream<String, String> messages = KafkaUtils.createDirectStream(
+                    jssc,
+                    String.class,
+                    String.class,
+                    StringDecoder.class,
+                    StringDecoder.class,
+                    kafkaParams,
+                    topicsSet
+            );
 
             // Pick the messages
-            JavaDStream<String> lines = KafkaUtils.createStream(jssc, zkHost, consGroup, topicMap).map(Tuple2::_2);
+            JavaDStream<String> lines = messages.map(Tuple2::_2);
 
+            // Remove cancelled flights
+            JavaDStream<String> filteredLines = lines.filter(new RemoveCancelledFilter());
 
+            // Convert to paired RDD
             JavaPairDStream<String, Integer> carrierArrDelay =
-                    lines.mapToPair(new CarrierArrivalDelay(AirConstants.UNIQUE_CARRIER_INDEX));
+                    filteredLines.mapToPair(new CarrierArrivalDelay(AirConstants.UNIQUE_CARRIER_INDEX));
 
 
             // FIXME see if combineByKey can be used for G1Q1 as it has a mapSideCombine option
             // FIXME partitioner count is hard-coded
             JavaPairDStream<String, AvgCount> avgCounts =
-                    carrierArrDelay.combineByKey(createAcc, addAndCount, combine, new HashPartitioner(10), false);
+                    carrierArrDelay.combineByKey(createAcc, addAndCount, combine, new HashPartitioner(40), false);
 
             // FIXME debug
             // avgCounts.print();
@@ -103,6 +118,14 @@ public final class G1Q2 {
         }
     }
 
+    private static class RemoveCancelledFilter implements Function<String, Boolean> {
+        @Override
+        public Boolean call(String s) throws Exception {
+            String c = s.split(",")[AirConstants.CANCELLED_INDEX];
+            boolean cancelled = StringUtils.isNotEmpty(c) && Float.valueOf(c).equals(1);
+            return !cancelled;
+        }
+    }
 
     public static class AvgCount implements Serializable {
         public AvgCount(int total, int num) {
