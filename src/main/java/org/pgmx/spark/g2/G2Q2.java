@@ -1,5 +1,9 @@
 package org.pgmx.spark.g2;
 
+import com.datastax.driver.core.Session;
+import com.datastax.spark.connector.cql.CassandraConnector;
+import com.datastax.spark.connector.japi.CassandraJavaUtil;
+import com.datastax.spark.connector.japi.CassandraStreamingJavaUtil;
 import kafka.serializer.StringDecoder;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
@@ -49,9 +53,12 @@ public final class G2Q2 {
             int fetchIntervalMs = args.length > 4 ? Integer.valueOf(args[4]) : AirConstants.FETCH_COUNT_INTERVAL;
             String kafkaOffset = args.length > 5 && args[5].equalsIgnoreCase("Y") ?
                     AirConstants.KAFKA_OFFSET_SMALLEST : AirConstants.KAFKA_OFFSET_LARGEST;
+            String cassandraHost = args.length > 5 ? args[5] : AirConstants.CASSANDRA_HOST;
 
             SparkConf sparkConf = new SparkConf().setAppName("G2Q2");
             sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
+            sparkConf.set("spark.cassandra.connection.host", cassandraHost);
+            sparkConf.set("spark.cassandra.connection.keep_alive_ms", "" + (fetchIntervalMs + 5000));
 
             // Create the context with 2 seconds batch size
             JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(fetchIntervalMs));
@@ -77,6 +84,9 @@ public final class G2Q2 {
             // Pick the messages
             JavaDStream<String> lines = messages.map(Tuple2::_2);
 
+            // Remove cancelled flights
+            JavaDStream<String> filtered = lines.filter(new AirlineFilter(args[0]));
+
             // Filter by origin code
             JavaDStream<String> filteredLines = lines.filter(s ->
                     StringUtils.equals(s.split(",")[AirConstants.ORIGIN_INDEX], args[0]));
@@ -97,7 +107,7 @@ public final class G2Q2 {
             JavaPairDStream<String, AvgCount> statefulMap = avgCounts.updateStateByKey(COMPUTE_RUNNING_AVG);
 
             // unsorted // FIXME for debug
-            statefulMap.print(10);
+            //.print(10);
 
             // Puts the juicy stuff in AirportKey, the Integer is useless -- just a placeholder
             JavaPairDStream<OriginDestDepDelayKey, Integer> airports =
@@ -111,6 +121,7 @@ public final class G2Q2 {
 
             // Persist! //TODO restrict to 10?
             AirHelper.persist(sortedDestDepAvgs, G2Q2.class);
+            persistInDB(sortedDestDepAvgs, G2Q2.class, sparkConf);
 
             jssc.start();
             jssc.awaitTermination();
@@ -120,6 +131,21 @@ public final class G2Q2 {
         }
     }
 
+    private static class AirlineFilter implements Function<String, Boolean> {
+        String origin;
+
+        public AirlineFilter(String o) {
+            this.origin = o;
+        }
+
+        @Override
+        public Boolean call(String s) throws Exception {
+            String a[] = s.split(",");
+            boolean cancelled = StringUtils.isNotEmpty(a[AirConstants.CANCELLED_INDEX])
+                    && Float.valueOf(AirConstants.CANCELLED_INDEX).equals(1);
+            return !cancelled && StringUtils.equals(a[AirConstants.ORIGIN_INDEX], origin);
+        }
+    }
 
     public static class AvgCount implements Serializable {
         public AvgCount(int total, int num) {
@@ -203,49 +229,6 @@ public final class G2Q2 {
     };
 
 
-    static class OriginDestDepDelayKey implements Comparable<OriginDestDepDelayKey>, Serializable {
-        private String origin;
-        private String destination;
-        private Float avgDepDelay;
-
-
-        public String getDestination() {
-            return destination;
-        }
-
-        public OriginDestDepDelayKey(String origin, String destination, Float avgDepDelay) {
-            this.origin = origin;
-            this.destination = destination;
-            this.avgDepDelay = avgDepDelay;
-        }
-
-        @Override
-        public int compareTo(OriginDestDepDelayKey o) {
-            return this.avgDepDelay.compareTo(o.avgDepDelay);
-        }
-
-        @Override
-        public String toString() {
-            return origin + "," + destination + "," + avgDepDelay;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (!(o instanceof OriginDestDepDelayKey)) return false;
-
-            OriginDestDepDelayKey that = (OriginDestDepDelayKey) o;
-
-            return getDestination().equals(that.getDestination());
-        }
-
-        @Override
-        public int hashCode() {
-            return getDestination().hashCode();
-        }
-    }
-
-
     public static class DestinationDepartureDelay implements PairFunction<String, String, Integer> {
 
         @SuppressWarnings("unused")
@@ -266,5 +249,27 @@ public final class G2Q2 {
                     0 : Float.valueOf(arr[AirConstants.DEP_DELAY_INDEX]).intValue();
             return new Tuple2(arr[AirConstants.DEST_INDEX], depDelay);
         }
+    }
+
+    private static void persistInDB(JavaDStream<OriginDestDepDelayKey> javaDStream, Class clazz, SparkConf conf) {
+        LOG.info("- Will save in DB table: " + clazz.getSimpleName() + " -");
+        String keySpace = StringUtils.lowerCase("T2");
+        String tableName = StringUtils.lowerCase(clazz.getSimpleName());
+
+        CassandraConnector connector = CassandraConnector.apply(conf);
+        try (Session session = connector.openSession()) {
+            session.execute("CREATE KEYSPACE IF NOT EXISTS " + keySpace + " WITH replication = {'class': 'SimpleStrategy', " +
+                    "'replication_factor': 1}");
+            session.execute("CREATE TABLE IF NOT EXISTS " + keySpace + "." + tableName
+                    + " (origin text, dest text, avgdepdelay double, primary key(origin, dest))");
+
+            Map<String, String> fieldToColumnMapping = new HashMap<>();
+            fieldToColumnMapping.put("origin", "origin");
+            fieldToColumnMapping.put("destination", "dest");
+            fieldToColumnMapping.put("avgDepDelay", "avgdepdelay");
+            CassandraStreamingJavaUtil.javaFunctions(javaDStream).writerBuilder(keySpace, tableName,
+                    CassandraJavaUtil.mapToRow(OriginDestDepDelayKey.class, fieldToColumnMapping)).saveToCassandra();
+        }
+
     }
 }

@@ -1,5 +1,9 @@
 package org.pgmx.spark.g3;
 
+import com.datastax.driver.core.Session;
+import com.datastax.spark.connector.cql.CassandraConnector;
+import com.datastax.spark.connector.japi.CassandraJavaUtil;
+import com.datastax.spark.connector.japi.CassandraStreamingJavaUtil;
 import kafka.serializer.StringDecoder;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
@@ -58,9 +62,12 @@ public final class G3Q2 {
             int fetchIntervalMs = args.length > 7 ? Integer.valueOf(args[7]) : FETCH_COUNT_INTERVAL;
             String kafkaOffset = args.length > 8 && args[8].equalsIgnoreCase("Y") ?
                     KAFKA_OFFSET_SMALLEST : KAFKA_OFFSET_LARGEST;
+            String cassandraHost = args.length > 5 ? args[5] : CASSANDRA_HOST;
 
             SparkConf sparkConf = new SparkConf().setAppName("G3Q2");
             sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
+            sparkConf.set("spark.cassandra.connection.host", cassandraHost);
+            sparkConf.set("spark.cassandra.connection.keep_alive_ms", "" + (fetchIntervalMs + 5000));
 
             // Create the context with 2 seconds batch size
             JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(fetchIntervalMs));
@@ -87,10 +94,10 @@ public final class G3Q2 {
             JavaDStream<String> lines = messages.map(Tuple2::_2);
 
             // Leg1
-            processLeg1(origin, transit, startDate, lines);
+            processLeg1(sparkConf, origin, transit, startDate, lines);
 
             // Leg2
-            processLeg2(transit, dest, startDate, lines);
+            processLeg2(sparkConf, transit, dest, startDate, lines);
 
             jssc.start();
             jssc.awaitTermination();
@@ -146,7 +153,7 @@ public final class G3Q2 {
     //////////////////////////////////////////////////////////////////////
     //////////////////////////////// L E G 1 /////////////////////////////
     //////////////////////////////////////////////////////////////////////
-    private static void processLeg1(String leg1Origin, String leg1Dest, String startDate,
+    private static void processLeg1(SparkConf conf, String leg1Origin, String leg1Dest, String startDate,
                                     JavaDStream<String> lines) {
 
         Validator validator = new Validator(startDate);
@@ -178,12 +185,13 @@ public final class G3Q2 {
 
         // Persist!
         AirHelper.persist(sortedOrgDestArrAvgs, "LEG_1", G3Q2.class);
+        persistInDB(sortedOrgDestArrAvgs, G3Q2.class, conf);
     }
 
     //////////////////////////////////////////////////////////////////////
     //////////////////////////////// L E G 2 /////////////////////////////
     //////////////////////////////////////////////////////////////////////
-    private static void processLeg2(String leg2Origin, String leg2Dest, String startDate,
+    private static void processLeg2(SparkConf conf, String leg2Origin, String leg2Dest, String startDate,
                                     JavaDStream<String> lines) {
 
         Validator validator = new Validator(startDate);
@@ -215,6 +223,7 @@ public final class G3Q2 {
 
         // Persist!
         AirHelper.persist(sortedOrgDestArrAvgs, "LEG_2", G3Q2.class);
+        persistInDB(sortedOrgDestArrAvgs, G3Q2.class, conf);
     }
 
     public static class AvgCount implements Serializable {
@@ -294,75 +303,6 @@ public final class G3Q2 {
     };
 
 
-    public static class FlightLegKey implements Serializable, Comparable<FlightLegKey> {
-        private String flightLeg;
-        private String origin;
-        private String dest;
-        private String fltDate;
-        private String airline;
-        private String fltNum;
-        private String depTime;
-        private AvgCount avgCount;
-
-        public void setAvgCount(AvgCount avgCount) {
-            this.avgCount = avgCount;
-        }
-
-
-        @Override
-        public int compareTo(FlightLegKey that) {
-            return this.avgCount.avg().compareTo(that.avgCount.avg());
-        }
-
-
-        public FlightLegKey(String flightLeg, String origin, String dest, String fltDate, String airline,
-                            String fltNum, String depTime) {
-            this.flightLeg = flightLeg;
-            this.origin = origin;
-            this.dest = dest;
-            this.fltDate = fltDate;
-            this.airline = airline;
-            this.fltNum = fltNum;
-            this.depTime = depTime;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (!(o instanceof FlightLegKey)) return false;
-
-            FlightLegKey that = (FlightLegKey) o;
-
-            if (!origin.equals(that.origin)) return false;
-            if (!dest.equals(that.dest)) return false;
-            if (!fltDate.equals(that.fltDate)) return false;
-            if (!airline.equals(that.airline)) return false;
-            return fltNum.equals(that.fltNum);
-        }
-
-        @Override
-        public int hashCode() {
-            int result = origin.hashCode();
-            result = 31 * result + dest.hashCode();
-            result = 31 * result + fltDate.hashCode();
-            result = 31 * result + airline.hashCode();
-            result = 31 * result + fltNum.hashCode();
-            return result;
-        }
-
-        @Override
-        public String toString() {
-            return flightLeg + "," +
-                    origin + ',' +
-                    dest + ',' +
-                    fltDate + ',' +
-                    depTime + ',' +
-                    airline + ',' +
-                    fltNum + ',' +
-                    (null == avgCount ? "" : avgCount.avg().toString());
-        }
-    }
-
     public static class OrgDestArrDelay implements PairFunction<String, FlightLegKey, Integer> {
         private String flightLeg;
 
@@ -388,5 +328,33 @@ public final class G3Q2 {
                     : Float.valueOf(arr[ARR_DELAY_INDEX]).intValue();
             return new Tuple2(key, arrDelay);
         }
+    }
+
+    private static void persistInDB(JavaDStream<FlightLegKey> javaDStream, Class clazz, SparkConf conf) {
+        LOG.info("- Will save in DB table: " + clazz.getSimpleName() + " -");
+        String keySpace = StringUtils.lowerCase("T2");
+        String tableName = StringUtils.lowerCase(clazz.getSimpleName());
+        CassandraConnector connector = CassandraConnector.apply(conf);
+
+        try (Session session = connector.openSession()) {
+            session.execute("CREATE KEYSPACE IF NOT EXISTS " + keySpace + " WITH replication = {'class': 'SimpleStrategy', " +
+                    "'replication_factor': 1}");
+            session.execute("CREATE TABLE IF NOT EXISTS " + keySpace + "." + tableName
+                    + " (leg text, origin text, dest text, fltdate timestamp, airline text, fltnum text, deptime text,avgdelay double, " +
+                    "primary key(leg, origin, dest, fltdate, airline))");
+
+            Map<String, String> fieldToColumnMapping = new HashMap<>();
+            fieldToColumnMapping.put("flightLeg", "leg");
+            fieldToColumnMapping.put("origin", "origin");
+            fieldToColumnMapping.put("destination", "dest");
+            fieldToColumnMapping.put("airline", "airline");
+            fieldToColumnMapping.put("fltDate", "fltdate");
+            fieldToColumnMapping.put("fltNum", "fltnum");
+            fieldToColumnMapping.put("depTime", "deptime");
+            fieldToColumnMapping.put("avg", "avgdelay");
+            CassandraStreamingJavaUtil.javaFunctions(javaDStream).writerBuilder(keySpace, tableName,
+                    CassandraJavaUtil.mapToRow(FlightLegKey.class, fieldToColumnMapping)).saveToCassandra();
+        }
+
     }
 }

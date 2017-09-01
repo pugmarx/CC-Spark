@@ -1,6 +1,9 @@
 package org.pgmx.spark.common.utils;
 
+import com.datastax.driver.core.Session;
+import com.datastax.spark.connector.cql.CassandraConnector;
 import org.apache.log4j.Logger;
+import org.apache.spark.SparkConf;
 import org.apache.spark.streaming.api.java.JavaDStream;
 
 
@@ -33,4 +36,6 @@ public class AirHelper {
         String path = AirConstants.RAW_OUTPUT_DIR + "/" + clazz.getSimpleName() + "/" + subDir;
         persist(javaDStream, path);
     }
+
+
 }

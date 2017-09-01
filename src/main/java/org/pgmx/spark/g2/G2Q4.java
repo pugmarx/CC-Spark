@@ -1,5 +1,9 @@
 package org.pgmx.spark.g2;
 
+import com.datastax.driver.core.Session;
+import com.datastax.spark.connector.cql.CassandraConnector;
+import com.datastax.spark.connector.japi.CassandraJavaUtil;
+import com.datastax.spark.connector.japi.CassandraStreamingJavaUtil;
 import kafka.serializer.StringDecoder;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
@@ -47,9 +51,12 @@ public final class G2Q4 {
             int fetchIntervalMs = args.length > 5 ? Integer.valueOf(args[5]) : AirConstants.FETCH_COUNT_INTERVAL;
             String kafkaOffset = args.length > 6 && args[6].equalsIgnoreCase("Y") ?
                     AirConstants.KAFKA_OFFSET_SMALLEST : AirConstants.KAFKA_OFFSET_LARGEST;
+            String cassandraHost = args.length > 5 ? args[5] : AirConstants.CASSANDRA_HOST;
 
             SparkConf sparkConf = new SparkConf().setAppName("G2Q4");
             sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
+            sparkConf.set("spark.cassandra.connection.host", cassandraHost);
+            sparkConf.set("spark.cassandra.connection.keep_alive_ms", "" + (fetchIntervalMs + 5000));
 
             // Create the context with 2 seconds batch size
             JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(fetchIntervalMs));
@@ -109,6 +116,7 @@ public final class G2Q4 {
 
             // Persist!
             AirHelper.persist(sortedOrgDestArrAvgs, G2Q4.class);
+            persistInDB(sortedOrgDestArrAvgs, G2Q4.class, sparkConf);
 
             jssc.start();
             jssc.awaitTermination();
@@ -204,50 +212,6 @@ public final class G2Q4 {
     };
 
 
-    static class OrgDestMeanArrDelayKey implements Comparable<OrgDestMeanArrDelayKey>, Serializable {
-        private String origin;
-        private String destination;
-        private String airline;
-        private Float avgArrivalDelay;
-
-
-        public String getDestination() {
-            return destination;
-        }
-
-        public OrgDestMeanArrDelayKey(String origin, String destination, Float avgArrDelay) {
-            this.origin = origin;
-            this.destination = destination;
-            this.avgArrivalDelay = avgArrDelay;
-        }
-
-        @Override
-        public int compareTo(OrgDestMeanArrDelayKey o) {
-            return this.avgArrivalDelay.compareTo(o.avgArrivalDelay);
-        }
-
-        @Override
-        public String toString() {
-            return origin + "," + destination + "," + avgArrivalDelay;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (!(o instanceof OrgDestMeanArrDelayKey)) return false;
-
-            OrgDestMeanArrDelayKey that = (OrgDestMeanArrDelayKey) o;
-
-            return getDestination().equals(that.getDestination());
-        }
-
-        @Override
-        public int hashCode() {
-            return getDestination().hashCode();
-        }
-    }
-
-
     public static class OrgDestArrDelay implements PairFunction<String, String, Integer> {
         public Tuple2<String, Integer> apply(String s) {
             String[] arr = s.split(",");
@@ -265,5 +229,27 @@ public final class G2Q4 {
                     0 : Float.valueOf(arr[AirConstants.ARR_DELAY_INDEX]).intValue();
             return new Tuple2(orgDestKey, arrDelay);
         }
+    }
+
+    private static void persistInDB(JavaDStream<OrgDestMeanArrDelayKey> javaDStream, Class clazz, SparkConf conf) {
+        LOG.info("- Will save in DB table: " + clazz.getSimpleName() + " -");
+        String keySpace = StringUtils.lowerCase("T2");
+        String tableName = StringUtils.lowerCase(clazz.getSimpleName());
+
+        CassandraConnector connector = CassandraConnector.apply(conf);
+        try (Session session = connector.openSession()) {
+            session.execute("CREATE KEYSPACE IF NOT EXISTS " + keySpace + " WITH replication = {'class': 'SimpleStrategy', " +
+                    "'replication_factor': 1}");
+            session.execute("CREATE TABLE IF NOT EXISTS " + keySpace + "." + tableName
+                    + " (origin text, dest text, avgarrdelay double, primary key(origin, dest))");
+
+            Map<String, String> fieldToColumnMapping = new HashMap<>();
+            fieldToColumnMapping.put("origin", "origin");
+            fieldToColumnMapping.put("destination", "dest");
+            fieldToColumnMapping.put("avgArrivalDelay", "avgarrdelay");
+            CassandraStreamingJavaUtil.javaFunctions(javaDStream).writerBuilder(keySpace, tableName,
+                    CassandraJavaUtil.mapToRow(OrgDestMeanArrDelayKey.class, fieldToColumnMapping)).saveToCassandra();
+        }
+
     }
 }

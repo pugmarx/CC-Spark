@@ -35,6 +35,7 @@ public class AirConstants {
     public static final String RAW_OUTPUT_DIR = "./output"; //FIXME
     public static final String ZK_HOST = "localhost:2181"; // FIXME
     public static final String IN_TOPIC = "testspark"; // FIXME
+    public static final String CASSANDRA_HOST = "localhost";
 
     public static final String CONSUMER_GROUP = "spark_" + UUID.randomUUID(); // FIXME ***** to track!
     public static final int NUM_THREADS = 1;

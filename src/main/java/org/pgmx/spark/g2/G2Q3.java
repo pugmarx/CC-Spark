@@ -1,5 +1,9 @@
 package org.pgmx.spark.g2;
 
+import com.datastax.driver.core.Session;
+import com.datastax.spark.connector.cql.CassandraConnector;
+import com.datastax.spark.connector.japi.CassandraJavaUtil;
+import com.datastax.spark.connector.japi.CassandraStreamingJavaUtil;
 import kafka.serializer.StringDecoder;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
@@ -48,9 +52,12 @@ public final class G2Q3 {
             int fetchIntervalMs = args.length > 5 ? Integer.valueOf(args[5]) : AirConstants.FETCH_COUNT_INTERVAL;
             String kafkaOffset = args.length > 6 && args[6].equalsIgnoreCase("Y") ?
                     AirConstants.KAFKA_OFFSET_SMALLEST : AirConstants.KAFKA_OFFSET_LARGEST;
+            String cassandraHost = args.length > 5 ? args[5] : AirConstants.CASSANDRA_HOST;
 
             SparkConf sparkConf = new SparkConf().setAppName("G2Q3");
             sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
+            sparkConf.set("spark.cassandra.connection.host", cassandraHost);
+            sparkConf.set("spark.cassandra.connection.keep_alive_ms", "" + (fetchIntervalMs + 5000));
 
             // Create the context with 2 seconds batch size
             JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(fetchIntervalMs));
@@ -96,7 +103,7 @@ public final class G2Q3 {
             JavaPairDStream<String, AvgCount> statefulMap = avgCounts.updateStateByKey(COMPUTE_RUNNING_AVG);
 
             // unsorted // FIXME for debug
-            statefulMap.print(10);
+            //statefulMap.print(10);
 
             // Puts the juicy stuff in OriginDestCarrierArrDelayKey, the Integer is useless -- just a placeholder
             JavaPairDStream<OriginDestCarrierArrDelayKey, Integer> airports =
@@ -111,6 +118,7 @@ public final class G2Q3 {
 
             // Persist! //TODO restrict to 10?
             AirHelper.persist(sortedOrgDestCarrierArrAvgs, G2Q3.class);
+            persistInDB(sortedOrgDestCarrierArrAvgs, G2Q3.class, sparkConf);
 
             jssc.start();
             jssc.awaitTermination();
@@ -206,49 +214,6 @@ public final class G2Q3 {
         return Optional.of(running);
     };
 
-
-    static class OriginDestCarrierArrDelayKey implements Comparable<OriginDestCarrierArrDelayKey>, Serializable {
-        private String origin;
-        private String destination;
-        private String airline;
-        private Float avgArrivalDelay;
-
-
-        public String getDestination() {
-            return destination;
-        }
-
-        public OriginDestCarrierArrDelayKey(String origin, String destination, String airline, Float avgArrDelay) {
-            this.origin = origin;
-            this.destination = destination;
-            this.airline = airline;
-            this.avgArrivalDelay = avgArrDelay;
-        }
-
-        @Override
-        public int compareTo(OriginDestCarrierArrDelayKey o) {
-            return this.avgArrivalDelay.compareTo(o.avgArrivalDelay);
-        }
-
-        @Override
-        public String toString() {
-            return origin + "," + destination + "," + airline + "," + avgArrivalDelay;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (!(o instanceof OriginDestCarrierArrDelayKey)) return false;
-            OriginDestCarrierArrDelayKey that = (OriginDestCarrierArrDelayKey) o;
-            return getDestination().equals(that.getDestination());
-        }
-
-        @Override
-        public int hashCode() {
-            return getDestination().hashCode();
-        }
-    }
-
     public static class AirlineArrivalDelay implements PairFunction<String, String, Integer> {
 
         public Tuple2<String, Integer> apply(String s) {
@@ -268,4 +233,28 @@ public final class G2Q3 {
             return new Tuple2(arr[AirConstants.UNIQUE_CARRIER_INDEX], arrDelay);
         }
     }
+
+    private static void persistInDB(JavaDStream<OriginDestCarrierArrDelayKey> javaDStream, Class clazz, SparkConf conf) {
+        LOG.info("- Will save in DB table: " + clazz.getSimpleName() + " -");
+        String keySpace = StringUtils.lowerCase("T2");
+        String tableName = StringUtils.lowerCase(clazz.getSimpleName());
+
+        CassandraConnector connector = CassandraConnector.apply(conf);
+        try (Session session = connector.openSession()) {
+            session.execute("CREATE KEYSPACE IF NOT EXISTS " + keySpace + " WITH replication = {'class': 'SimpleStrategy', " +
+                    "'replication_factor': 1}");
+            session.execute("CREATE TABLE IF NOT EXISTS " + keySpace + "." + tableName
+                    + " (origin text, dest text, airline text, avgarrdelay double, primary key(origin, dest, airline))");
+
+            Map<String, String> fieldToColumnMapping = new HashMap<>();
+            fieldToColumnMapping.put("origin", "origin");
+            fieldToColumnMapping.put("destination", "dest");
+            fieldToColumnMapping.put("airline", "airline");
+            fieldToColumnMapping.put("avgArrivalDelay", "avgarrdelay");
+            CassandraStreamingJavaUtil.javaFunctions(javaDStream).writerBuilder(keySpace, tableName,
+                    CassandraJavaUtil.mapToRow(OriginDestCarrierArrDelayKey.class, fieldToColumnMapping)).saveToCassandra();
+        }
+
+    }
+
 }

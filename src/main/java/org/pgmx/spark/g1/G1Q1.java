@@ -1,8 +1,12 @@
 package org.pgmx.spark.g1;
 
+import com.datastax.driver.core.Session;
+import com.datastax.spark.connector.cql.CassandraConnector;
+import com.datastax.spark.connector.japi.CassandraJavaUtil;
+import com.datastax.spark.connector.japi.CassandraStreamingJavaUtil;
 import kafka.serializer.StringDecoder;
+import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
-import org.apache.spark.HashPartitioner;
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
@@ -16,13 +20,10 @@ import org.apache.spark.streaming.api.java.JavaPairDStream;
 import org.apache.spark.streaming.api.java.JavaPairInputDStream;
 import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import org.apache.spark.streaming.kafka.KafkaUtils;
-import org.omg.PortableInterceptor.ORBIdHelper;
 import org.pgmx.spark.common.utils.AirConstants;
 import org.pgmx.spark.common.utils.AirHelper;
 import scala.Tuple2;
-import scala.Tuple4;
 
-import java.io.Serializable;
 import java.util.*;
 
 /**
@@ -38,7 +39,6 @@ public final class G1Q1 {
     public static void main(String[] args) throws Exception {
 
         try {
-
             String zkHostOrBrokers = args.length > 0 ? args[0] : AirConstants.ZK_HOST;
             String kafkaTopic = args.length > 1 ? args[1] : AirConstants.IN_TOPIC;
             //String consGroup = args.length > 2 ? args[2] : AirConstants.CONSUMER_GROUP;
@@ -47,9 +47,15 @@ public final class G1Q1 {
             int fetchIntervalMs = args.length > 3 ? Integer.valueOf(args[3]) : AirConstants.FETCH_COUNT_INTERVAL;
             String kafkaOffset = args.length > 4 && args[4].equalsIgnoreCase("Y") ?
                     AirConstants.KAFKA_OFFSET_SMALLEST : AirConstants.KAFKA_OFFSET_LARGEST;
+            String cassandraHost = args.length > 5 ? args[5] : AirConstants.CASSANDRA_HOST;
 
             SparkConf sparkConf = new SparkConf().setAppName("G1Q1");
             sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
+            sparkConf.set("spark.cassandra.connection.host", cassandraHost);
+            sparkConf.set("spark.cassandra.connection.keep_alive_ms", "" + (fetchIntervalMs + 5000));
+            //.set("spark.cassandra.auth.username", "cassandra")
+            //.set("spark.cassandra.auth.password", "cassandra")
+
 
             // Create the context with 2 seconds batch size
             JavaStreamingContext jssc = new JavaStreamingContext(sparkConf, new Duration(fetchIntervalMs));
@@ -78,19 +84,11 @@ public final class G1Q1 {
             // Pick the messages
             JavaDStream<String> lines = messages.map(Tuple2::_2);
 
-            // FIXME, smarter way to do this??
-            //JavaDStream<Tuple4<String, Integer, String, Integer>> airports =
-            //       lines.map(new FourTupleConverter(AirConstants.ORIGIN_INDEX, AirConstants.DEST_INDEX));
-
             JavaPairDStream<String, Integer> origins = lines.mapToPair(new RelevantIndexFetcher(AirConstants.ORIGIN_INDEX));
+
             JavaPairDStream<String, Integer> destinations = lines.mapToPair(new RelevantIndexFetcher(AirConstants.DEST_INDEX));
             JavaPairDStream<String, Integer> allRecs = origins.union(destinations);
 
-            // JavaPairDStream<String, Integer> airportPairs = airports.transformToPair()
-
-            // Uses lambda to indicate that the values should be added (reduceByKey)
-            //JavaPairDStream<String, Integer> summarized = allRecs.combineByKey(create, add, combine,
-            //       new HashPartitioner(40), true);
             JavaPairDStream<String, Integer> summarized = allRecs.reduceByKey((i1, i2) -> i1 + i2);
 
             // Store in a stateful ds
@@ -107,7 +105,7 @@ public final class G1Q1 {
 
             // Persist! //TODO restrict to 10?
             AirHelper.persist(sortedAirports, G1Q1.class);
-
+            //persistInDB(sortedAirports, G1Q1.class, sparkConf);
 
             jssc.start();
             jssc.awaitTermination();
@@ -122,30 +120,6 @@ public final class G1Q1 {
     static Function2<Integer, Integer, Integer> combine = (a, b) -> a + b;
 
 
-//    static class TupleTransformer implements Function<JavaRDD<Tuple4<String, Integer, String, Integer>>, JavaPairRDD<String, Integer>>{
-//
-//        @Override
-//        public JavaPairRDD<String, Integer> call(JavaRDD<Tuple4<String, Integer, String, Integer>> tuple4RDD) throws Exception {
-//            return tuple4RDD.
-//        }
-//    }
-
-    static class FourTupleConverter implements Function<String, Tuple4<String, Integer, String, Integer>> {
-        int index1;
-        int index2;
-
-        public FourTupleConverter(int indx1, int indx2) {
-            this.index1 = indx1;
-            this.index2 = indx2;
-        }
-
-        @Override
-        public Tuple4<String, Integer, String, Integer> call(String s) throws Exception {
-            String[] arr = s.split(",");
-            return new Tuple4(arr[index1], Integer.valueOf(1), arr[index2], 1);
-        }
-    }
-
     /**
      * We used this transformer because sortByKey is only available here. Other (non-pair-based) options did
      * not have a built-in option to sort by keys
@@ -156,7 +130,6 @@ public final class G1Q1 {
             return unsortedRDD.sortByKey(false).keys(); // DESC sort
         }
     }
-
 
     /**
      * Used to prepare a CustomKey (@AirportKey) based RDD out of the "raw" (String,Integer) RDD
@@ -179,7 +152,6 @@ public final class G1Q1 {
         }
     }
 
-
     // List of incoming vals, currentVal, returnVal
     private static Function2<List<Integer>, Optional<Integer>, Optional<Integer>>
             COMPUTE_RUNNING_SUM = (nums, current) -> {
@@ -189,67 +161,6 @@ public final class G1Q1 {
         }
         return Optional.of(sum);
     };
-
-
-    static class AirportKey implements Comparable<AirportKey>, Serializable {
-
-        private String airportCode;
-        private Integer flightCount;
-
-
-        public String getAirportCode() {
-            return airportCode;
-        }
-
-        public Integer getFlightCount() {
-            return flightCount;
-        }
-
-        public void setFlightCount(Integer flightCount) {
-            this.flightCount = flightCount;
-        }
-
-        public void addFlightCount(Integer countToAdd) {
-            this.flightCount += countToAdd;
-        }
-
-
-        public AirportKey() {
-            airportCode = "";
-            flightCount = 0;
-        }
-
-        public AirportKey(String airportCode, Integer flightCount) {
-            this.airportCode = airportCode;
-            this.flightCount = flightCount;
-        }
-
-
-        @Override
-        public int compareTo(AirportKey o) {
-            return this.flightCount.compareTo(o.getFlightCount()); // reverse sort
-        }
-
-        @Override
-        public String toString() {
-            return airportCode + ", " + flightCount;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (!(o instanceof AirportKey)) return false;
-
-            AirportKey that = (AirportKey) o;
-
-            return getAirportCode().equals(that.getAirportCode());
-        }
-
-        @Override
-        public int hashCode() {
-            return getAirportCode().hashCode();
-        }
-    }
 
     public static class RelevantIndexFetcher implements PairFunction<String, String, Integer> {
         int relIndex = 0;
@@ -269,6 +180,26 @@ public final class G1Q1 {
         @Override
         public Tuple2<String, Integer> call(String s) throws Exception {
             return new Tuple2(s.split(",")[relIndex], Integer.valueOf(1));
+        }
+    }
+
+    private static void persistInDB(JavaDStream<AirportKey> javaDStream, Class clazz, SparkConf conf) {
+        LOG.info("- Will save in DB table: " + clazz.getSimpleName() + " -");
+        String keySpace = StringUtils.lowerCase("T2");
+        String tableName = StringUtils.lowerCase(clazz.getSimpleName());
+
+        CassandraConnector connector = CassandraConnector.apply(conf);
+        try (Session session = connector.openSession()) {
+            session.execute("CREATE KEYSPACE IF NOT EXISTS " + keySpace + " WITH replication = {'class': 'SimpleStrategy', " +
+                    "'replication_factor': 1}");
+            session.execute("CREATE TABLE IF NOT EXISTS " + keySpace + "." + tableName
+                    + " (airportcode text, flightcount double, primary key(airportcode))");
+
+            Map<String, String> fieldToColumnMapping = new HashMap<>();
+            fieldToColumnMapping.put("airportCode", "airportcode");
+            fieldToColumnMapping.put("flightCount", "flightcount");
+            CassandraStreamingJavaUtil.javaFunctions(javaDStream).writerBuilder(keySpace, tableName,
+                    CassandraJavaUtil.mapToRow(AirportKey.class, fieldToColumnMapping)).saveToCassandra();
         }
     }
 }
