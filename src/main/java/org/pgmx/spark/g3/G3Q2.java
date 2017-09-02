@@ -62,7 +62,7 @@ public final class G3Q2 {
             int fetchIntervalMs = args.length > 7 ? Integer.valueOf(args[7]) : FETCH_COUNT_INTERVAL;
             String kafkaOffset = args.length > 8 && args[8].equalsIgnoreCase("Y") ?
                     KAFKA_OFFSET_SMALLEST : KAFKA_OFFSET_LARGEST;
-            String cassandraHost = args.length > 5 ? args[5] : CASSANDRA_HOST;
+            String cassandraHost = args.length > 9 ? args[9] : CASSANDRA_HOST;
 
             SparkConf sparkConf = new SparkConf().setAppName("G3Q2");
             sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
@@ -94,10 +94,10 @@ public final class G3Q2 {
             JavaDStream<String> lines = messages.map(Tuple2::_2);
 
             // Leg1
-            processLeg1(sparkConf, origin, transit, startDate, lines);
+            processLeg1(sparkConf, origin, transit, dest, startDate, lines);
 
             // Leg2
-            processLeg2(sparkConf, transit, dest, startDate, lines);
+            processLeg2(sparkConf, origin, transit, dest, startDate, lines);
 
             jssc.start();
             jssc.awaitTermination();
@@ -153,15 +153,15 @@ public final class G3Q2 {
     //////////////////////////////////////////////////////////////////////
     //////////////////////////////// L E G 1 /////////////////////////////
     //////////////////////////////////////////////////////////////////////
-    private static void processLeg1(SparkConf conf, String leg1Origin, String leg1Dest, String startDate,
+    private static void processLeg1(SparkConf conf, String origin, String transit, String dest, String startDate,
                                     JavaDStream<String> lines) {
 
         Validator validator = new Validator(startDate);
-        JavaDStream<String> filteredLines = lines.filter(new Leg1Filter(leg1Origin, leg1Dest, validator));
+        JavaDStream<String> filteredLines = lines.filter(new Leg1Filter(origin, transit, validator));
 
         // Get pairs from these filtered lines output is (ORG,DEST) -> ARR_DELAY
         JavaPairDStream<FlightLegKey, Integer> carrierArrDelay
-                = filteredLines.mapToPair(new OrgDestArrDelay("LEG_1"));
+                = filteredLines.mapToPair(new OrgDestArrDelay("LEG_1", validator.getFormattedLeg1Date(), origin, transit, dest));
 
         // FIXME partitioner count is hard-coded
         JavaPairDStream<FlightLegKey, AvgCount> avgCounts =
@@ -181,7 +181,7 @@ public final class G3Q2 {
         JavaDStream<FlightLegKey> sortedOrgDestArrAvgs = airports.transform(new RDDSortTransformer());
 
         // **** Print top 10 from sorted map ***
-        sortedOrgDestArrAvgs.print();
+        sortedOrgDestArrAvgs.print(1);
 
         // Persist!
         AirHelper.persist(sortedOrgDestArrAvgs, "LEG_1", G3Q2.class);
@@ -191,15 +191,15 @@ public final class G3Q2 {
     //////////////////////////////////////////////////////////////////////
     //////////////////////////////// L E G 2 /////////////////////////////
     //////////////////////////////////////////////////////////////////////
-    private static void processLeg2(SparkConf conf, String leg2Origin, String leg2Dest, String startDate,
+    private static void processLeg2(SparkConf conf, String origin, String transit, String dest, String startDate,
                                     JavaDStream<String> lines) {
 
         Validator validator = new Validator(startDate);
-        JavaDStream<String> filteredLines = lines.filter(new Leg2Filter(leg2Origin, leg2Dest, validator));
+        JavaDStream<String> filteredLines = lines.filter(new Leg2Filter(transit, dest, validator));
 
         // Get pairs from these filtered lines output is (ORG,DEST) -> ARR_DELAY
         JavaPairDStream<FlightLegKey, Integer> carrierArrDelay
-                = filteredLines.mapToPair(new OrgDestArrDelay("LEG_2"));
+                = filteredLines.mapToPair(new OrgDestArrDelay("LEG_2", validator.getFormattedLeg1Date(), origin, transit, dest));
 
         // FIXME partitioner count is hard-coded
         JavaPairDStream<FlightLegKey, AvgCount> avgCounts =
@@ -219,7 +219,7 @@ public final class G3Q2 {
         JavaDStream<FlightLegKey> sortedOrgDestArrAvgs = airports.transform(new RDDSortTransformer());
 
         // **** Print top 10 from sorted map ***
-        sortedOrgDestArrAvgs.print();
+        sortedOrgDestArrAvgs.print(1);
 
         // Persist!
         AirHelper.persist(sortedOrgDestArrAvgs, "LEG_2", G3Q2.class);
@@ -305,14 +305,22 @@ public final class G3Q2 {
 
     public static class OrgDestArrDelay implements PairFunction<String, FlightLegKey, Integer> {
         private String flightLeg;
+        private String startDate;
+        private String transit;
+        private String origin;
+        private String dest;
 
-        public OrgDestArrDelay(String flightLeg) {
+        public OrgDestArrDelay(String flightLeg, String startDate, String o, String t, String d) {
             this.flightLeg = flightLeg;
+            this.startDate = startDate;
+            this.origin = o;
+            this.transit = t;
+            this.dest = d;
         }
 
         public Tuple2<FlightLegKey, Integer> apply(String s) {
             String[] arr = s.split(",");
-            FlightLegKey key = new FlightLegKey(flightLeg, arr[ORIGIN_INDEX], arr[DEST_INDEX], arr[FLT_DATE_INDEX],
+            FlightLegKey key = new FlightLegKey(flightLeg, startDate, origin, transit, dest, arr[FLT_DATE_INDEX],
                     arr[UNIQUE_CARRIER_INDEX], arr[FLT_NUM_INDEX], arr[DEP_TIME_INDEX]);
             Integer arrDelay = StringUtils.isEmpty(arr[ARR_DELAY_INDEX]) ?
                     0 : Float.valueOf(arr[ARR_DELAY_INDEX]).intValue();
@@ -322,7 +330,7 @@ public final class G3Q2 {
         @Override
         public Tuple2<FlightLegKey, Integer> call(String s) throws Exception {
             String[] arr = s.split(",");
-            FlightLegKey key = new FlightLegKey(flightLeg, arr[ORIGIN_INDEX], arr[DEST_INDEX], arr[FLT_DATE_INDEX],
+            FlightLegKey key = new FlightLegKey(flightLeg, startDate, origin, transit, dest, arr[FLT_DATE_INDEX],
                     arr[UNIQUE_CARRIER_INDEX], arr[FLT_NUM_INDEX], arr[DEP_TIME_INDEX]);
             Integer arrDelay = StringUtils.isEmpty(arr[ARR_DELAY_INDEX]) ? 0
                     : Float.valueOf(arr[ARR_DELAY_INDEX]).intValue();
@@ -340,18 +348,22 @@ public final class G3Q2 {
             session.execute("CREATE KEYSPACE IF NOT EXISTS " + keySpace + " WITH replication = {'class': 'SimpleStrategy', " +
                     "'replication_factor': 1}");
             session.execute("CREATE TABLE IF NOT EXISTS " + keySpace + "." + tableName
-                    + " (leg text, origin text, dest text, fltdate timestamp, airline text, fltnum text, deptime text,avgdelay double, " +
-                    "primary key(leg, origin, dest, fltdate, airline))");
+                    + " (leg text, origin text, transit text, dest text, startdate timestamp, fltdate timestamp, " +
+                    "airline text, fltnum text, deptime text, avgdelay double, " +
+                    "primary key(origin, transit, dest, startdate, leg, avgdelay, airline, fltnum))");
 
             Map<String, String> fieldToColumnMapping = new HashMap<>();
             fieldToColumnMapping.put("flightLeg", "leg");
             fieldToColumnMapping.put("origin", "origin");
+            fieldToColumnMapping.put("transit", "transit");
             fieldToColumnMapping.put("destination", "dest");
             fieldToColumnMapping.put("airline", "airline");
+            fieldToColumnMapping.put("startDate", "startdate");
             fieldToColumnMapping.put("fltDate", "fltdate");
             fieldToColumnMapping.put("fltNum", "fltnum");
             fieldToColumnMapping.put("depTime", "deptime");
             fieldToColumnMapping.put("avg", "avgdelay");
+
             CassandraStreamingJavaUtil.javaFunctions(javaDStream).writerBuilder(keySpace, tableName,
                     CassandraJavaUtil.mapToRow(FlightLegKey.class, fieldToColumnMapping)).saveToCassandra();
         }

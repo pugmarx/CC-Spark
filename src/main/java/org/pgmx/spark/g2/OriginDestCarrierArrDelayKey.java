@@ -3,6 +3,34 @@ package org.pgmx.spark.g2;
 import java.io.Serializable;
 
 public class OriginDestCarrierArrDelayKey implements Comparable<OriginDestCarrierArrDelayKey>, Serializable {
+    public String getOrigin() {
+        return origin;
+    }
+
+    public void setOrigin(String origin) {
+        this.origin = origin;
+    }
+
+    public void setDestination(String destination) {
+        this.destination = destination;
+    }
+
+    public String getAirline() {
+        return airline;
+    }
+
+    public void setAirline(String airline) {
+        this.airline = airline;
+    }
+
+    public Float getAvgArrivalDelay() {
+        return avgArrivalDelay;
+    }
+
+    public void setAvgArrivalDelay(Float avgArrivalDelay) {
+        this.avgArrivalDelay = avgArrivalDelay;
+    }
+
     private String origin;
     private String destination;
     private String airline;

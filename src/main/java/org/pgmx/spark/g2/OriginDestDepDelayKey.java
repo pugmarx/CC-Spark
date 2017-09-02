@@ -4,6 +4,23 @@ import java.io.Serializable;
 
 public class OriginDestDepDelayKey implements Comparable<OriginDestDepDelayKey>, Serializable {
     private String origin;
+
+    public String getOrigin() {
+        return origin;
+    }
+
+    public void setOrigin(String origin) {
+        this.origin = origin;
+    }
+
+    public Float getAvgDepDelay() {
+        return avgDepDelay;
+    }
+
+    public void setAvgDepDelay(Float avgDepDelay) {
+        this.avgDepDelay = avgDepDelay;
+    }
+
     private String destination;
     private Float avgDepDelay;
 

@@ -5,6 +5,23 @@ import java.io.Serializable;
 public class FlightLegKey implements Serializable, Comparable<FlightLegKey> {
     private String flightLeg;
     private String origin;
+    private String transit;
+    private String dest;
+    private String startDate;
+    private String fltDate;
+    private String airline;
+    private String fltNum;
+    private String depTime;
+    private Float avg;
+    private G3Q2.AvgCount avgCount;
+
+    public String getTransit() {
+        return transit;
+    }
+
+    public String getStartDate() {
+        return startDate;
+    }
 
     public String getFlightLeg() {
         return flightLeg;
@@ -62,13 +79,9 @@ public class FlightLegKey implements Serializable, Comparable<FlightLegKey> {
         this.depTime = depTime;
     }
 
-    private String dest;
-    private String fltDate;
-    private String airline;
-    private String fltNum;
-    private String depTime;
-    private Float avg;
-    private G3Q2.AvgCount avgCount;
+    public Float getAvg() {
+        return avgCount.avg();
+    }
 
     public void setAvgCount(G3Q2.AvgCount avgCount) {
         this.avgCount = avgCount;
@@ -80,19 +93,17 @@ public class FlightLegKey implements Serializable, Comparable<FlightLegKey> {
     }
 
 
-    public FlightLegKey(String flightLeg, String origin, String dest, String fltDate, String airline,
-                        String fltNum, String depTime) {
+    public FlightLegKey(String flightLeg, String startDate, String origin, String transit, String dest, String fltDate,
+                        String airline, String fltNum, String depTime) {
         this.flightLeg = flightLeg;
+        this.startDate = startDate;
+        this.transit = transit;
         this.origin = origin;
         this.dest = dest;
         this.fltDate = fltDate;
         this.airline = airline;
         this.fltNum = fltNum;
         this.depTime = depTime;
-    }
-
-    public Float getAvg() {
-        return avgCount.avg();
     }
 
     @Override
@@ -123,6 +134,7 @@ public class FlightLegKey implements Serializable, Comparable<FlightLegKey> {
     public String toString() {
         return flightLeg + "," +
                 origin + ',' +
+                transit + ',' +
                 dest + ',' +
                 fltDate + ',' +
                 depTime + ',' +

@@ -52,7 +52,7 @@ public final class G2Q3 {
             int fetchIntervalMs = args.length > 5 ? Integer.valueOf(args[5]) : AirConstants.FETCH_COUNT_INTERVAL;
             String kafkaOffset = args.length > 6 && args[6].equalsIgnoreCase("Y") ?
                     AirConstants.KAFKA_OFFSET_SMALLEST : AirConstants.KAFKA_OFFSET_LARGEST;
-            String cassandraHost = args.length > 5 ? args[5] : AirConstants.CASSANDRA_HOST;
+            String cassandraHost = args.length > 7 ? args[7] : AirConstants.CASSANDRA_HOST;
 
             SparkConf sparkConf = new SparkConf().setAppName("G2Q3");
             sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
@@ -244,7 +244,7 @@ public final class G2Q3 {
             session.execute("CREATE KEYSPACE IF NOT EXISTS " + keySpace + " WITH replication = {'class': 'SimpleStrategy', " +
                     "'replication_factor': 1}");
             session.execute("CREATE TABLE IF NOT EXISTS " + keySpace + "." + tableName
-                    + " (origin text, dest text, airline text, avgarrdelay double, primary key(origin, dest, airline))");
+                    + " (origin text, dest text, airline text, avgarrdelay double, primary key(origin, dest, avgarrdelay, airline))");
 
             Map<String, String> fieldToColumnMapping = new HashMap<>();
             fieldToColumnMapping.put("origin", "origin");

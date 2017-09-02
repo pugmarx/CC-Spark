@@ -4,7 +4,16 @@ import java.io.Serializable;
 
 public class OrgDestMeanArrDelayKey implements Comparable<OrgDestMeanArrDelayKey>, Serializable {
     private String origin;
-    private String destination;
+
+    public String getOrigin() {
+        return origin;
+    }
+
+   public Float getAvgArrivalDelay() {
+        return avgArrivalDelay;
+    }
+
+     private String destination;
     private Float avgArrivalDelay;
 
 
