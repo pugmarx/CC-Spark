@@ -185,7 +185,7 @@ public final class G3Q2 {
 
         // Persist!
         AirHelper.persist(sortedOrgDestArrAvgs, "LEG_1", G3Q2.class);
-        persistInDB(sortedOrgDestArrAvgs, G3Q2.class, conf);
+        persistInDB(sortedOrgDestArrAvgs, G3Q2.class, conf, origin, transit, dest, startDate, "LEG_1");
     }
 
     //////////////////////////////////////////////////////////////////////
@@ -223,7 +223,7 @@ public final class G3Q2 {
 
         // Persist!
         AirHelper.persist(sortedOrgDestArrAvgs, "LEG_2", G3Q2.class);
-        persistInDB(sortedOrgDestArrAvgs, G3Q2.class, conf);
+        persistInDB(sortedOrgDestArrAvgs, G3Q2.class, conf, origin, transit, dest, startDate, "LEG_2");
     }
 
     public static class AvgCount implements Serializable {
@@ -338,11 +338,15 @@ public final class G3Q2 {
         }
     }
 
-    private static void persistInDB(JavaDStream<FlightLegKey> javaDStream, Class clazz, SparkConf conf) {
+    private static void persistInDB(JavaDStream<FlightLegKey> javaDStream, Class clazz, SparkConf conf, String org, String transit,
+                                    String dest, String startDate, String leg) {
         LOG.info("- Will save in DB table: " + clazz.getSimpleName() + " -");
         String keySpace = StringUtils.lowerCase("T2");
         String tableName = StringUtils.lowerCase(clazz.getSimpleName());
         CassandraConnector connector = CassandraConnector.apply(conf);
+//        String delQuery = "DELETE FROM " + keySpace + "." + tableName + " WHERE origin='" + org + "' and transit='"
+//                + transit + "' and dest='" + dest + "' and startdate='"
+//                + new Validator(startDate).getFormattedLeg1Date() + "' and leg='" + leg + "'";
 
         try (Session session = connector.openSession()) {
             session.execute("CREATE KEYSPACE IF NOT EXISTS " + keySpace + " WITH replication = {'class': 'SimpleStrategy', " +
@@ -351,6 +355,12 @@ public final class G3Q2 {
                     + " (leg text, origin text, transit text, dest text, startdate timestamp, fltdate timestamp, " +
                     "airline text, fltnum text, deptime text, avgdelay double, " +
                     "primary key(origin, transit, dest, startdate, leg, avgdelay, airline, fltnum))");
+
+//            javaDStream.foreachRDD(rdd -> {
+//                if (rdd.count() > 0) {
+//                    session.execute(delQuery);
+//                }
+//            });
 
             Map<String, String> fieldToColumnMapping = new HashMap<>();
             fieldToColumnMapping.put("flightLeg", "leg");

@@ -85,7 +85,7 @@ public final class G2Q2 {
             JavaDStream<String> lines = messages.map(Tuple2::_2);
 
             // Remove cancelled flights
-            JavaDStream<String> filtered = lines.filter(new AirlineFilter(args[0]));
+            //JavaDStream<String> filtered = lines.filter(new AirlineFilter(args[0]));
 
             // Filter by origin code
             JavaDStream<String> filteredLines = lines.filter(s ->
@@ -121,7 +121,7 @@ public final class G2Q2 {
 
             // Persist! //TODO restrict to 10?
             AirHelper.persist(sortedDestDepAvgs, G2Q2.class);
-            persistInDB(sortedDestDepAvgs, G2Q2.class, sparkConf);
+            persistInDB(sortedDestDepAvgs, G2Q2.class, sparkConf, args[0]);
 
             jssc.start();
             jssc.awaitTermination();
@@ -251,17 +251,24 @@ public final class G2Q2 {
         }
     }
 
-    private static void persistInDB(JavaDStream<OriginDestDepDelayKey> javaDStream, Class clazz, SparkConf conf) {
+    private static void persistInDB(JavaDStream<OriginDestDepDelayKey> javaDStream, Class clazz, SparkConf conf, String org) {
         LOG.info("- Will save in DB table: " + clazz.getSimpleName() + " -");
         String keySpace = StringUtils.lowerCase("T2");
         String tableName = StringUtils.lowerCase(clazz.getSimpleName());
+        String delQuery = "DELETE FROM " + keySpace + "." + tableName + " WHERE origin='" + org + "'";
 
         CassandraConnector connector = CassandraConnector.apply(conf);
         try (Session session = connector.openSession()) {
             session.execute("CREATE KEYSPACE IF NOT EXISTS " + keySpace + " WITH replication = {'class': 'SimpleStrategy', " +
                     "'replication_factor': 1}");
             session.execute("CREATE TABLE IF NOT EXISTS " + keySpace + "." + tableName
-                    + " (origin text, dest text, avgdepdelay double, primary key(origin, avgdepdelay, dest))");
+                    + " (origin text, dest text, avgdepdelay double, primary key(origin, dest))");
+
+//            javaDStream.foreachRDD(rdd -> {
+//                if (rdd.count() > 0) {
+//                    session.execute(delQuery);
+//                }
+//            });
 
             Map<String, String> fieldToColumnMapping = new HashMap<>();
             fieldToColumnMapping.put("origin", "origin");

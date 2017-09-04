@@ -241,7 +241,7 @@ public final class G2Q4 {
             session.execute("CREATE KEYSPACE IF NOT EXISTS " + keySpace + " WITH replication = {'class': 'SimpleStrategy', " +
                     "'replication_factor': 1}");
             session.execute("CREATE TABLE IF NOT EXISTS " + keySpace + "." + tableName
-                    + " (origin text, dest text, avgarrdelay double, primary key(origin, dest, avgarrdelay))");
+                    + " (origin text, dest text, avgarrdelay double, primary key(origin, dest))");
 
             Map<String, String> fieldToColumnMapping = new HashMap<>();
             fieldToColumnMapping.put("origin", "origin");

@@ -23,6 +23,7 @@ import org.apache.spark.streaming.api.java.JavaStreamingContext;
 import org.apache.spark.streaming.kafka.KafkaUtils;
 import org.pgmx.spark.common.utils.AirConstants;
 import org.pgmx.spark.common.utils.AirHelper;
+import org.pgmx.spark.g1.AirportKey;
 import scala.Tuple2;
 
 import java.io.Serializable;
@@ -118,7 +119,7 @@ public final class G2Q3 {
 
             // Persist! //TODO restrict to 10?
             AirHelper.persist(sortedOrgDestCarrierArrAvgs, G2Q3.class);
-            persistInDB(sortedOrgDestCarrierArrAvgs, G2Q3.class, sparkConf);
+            persistInDB(sortedOrgDestCarrierArrAvgs, G2Q3.class, sparkConf, args[0], args[1]);
 
             jssc.start();
             jssc.awaitTermination();
@@ -234,17 +235,19 @@ public final class G2Q3 {
         }
     }
 
-    private static void persistInDB(JavaDStream<OriginDestCarrierArrDelayKey> javaDStream, Class clazz, SparkConf conf) {
+    private static void persistInDB(JavaDStream<OriginDestCarrierArrDelayKey> javaDStream, Class clazz, SparkConf conf, String org, String dest) {
         LOG.info("- Will save in DB table: " + clazz.getSimpleName() + " -");
         String keySpace = StringUtils.lowerCase("T2");
         String tableName = StringUtils.lowerCase(clazz.getSimpleName());
+        String delQuery = "DELETE FROM " + keySpace + "." + tableName + " WHERE origin='" + org + "' and dest='" + dest + "'";
+        final boolean deleteFlag = false;
 
         CassandraConnector connector = CassandraConnector.apply(conf);
         try (Session session = connector.openSession()) {
             session.execute("CREATE KEYSPACE IF NOT EXISTS " + keySpace + " WITH replication = {'class': 'SimpleStrategy', " +
                     "'replication_factor': 1}");
             session.execute("CREATE TABLE IF NOT EXISTS " + keySpace + "." + tableName
-                    + " (origin text, dest text, airline text, avgarrdelay double, primary key(origin, dest, avgarrdelay, airline))");
+                    + " (origin text, dest text, airline text, avgarrdelay double, primary key(origin, dest, airline))");
 
             Map<String, String> fieldToColumnMapping = new HashMap<>();
             fieldToColumnMapping.put("origin", "origin");
