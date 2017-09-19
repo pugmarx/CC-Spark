@@ -13,6 +13,7 @@ import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.Optional;
 import org.apache.spark.api.java.function.Function;
 import org.apache.spark.api.java.function.Function2;
+import org.apache.spark.api.java.function.PairFlatMapFunction;
 import org.apache.spark.api.java.function.PairFunction;
 import org.apache.spark.streaming.Duration;
 import org.apache.spark.streaming.api.java.JavaDStream;
@@ -51,8 +52,8 @@ public final class G1Q1 {
 
             SparkConf sparkConf = new SparkConf().setAppName("G1Q1");
             sparkConf.set("spark.streaming.concurrentJobs", "" + streamJobs);
-            sparkConf.set("spark.cassandra.connection.host", cassandraHost);
-            sparkConf.set("spark.cassandra.connection.keep_alive_ms", "" + (fetchIntervalMs + 5000));
+            //sparkConf.set("spark.cassandra.connection.host", cassandraHost);
+            //sparkConf.set("spark.cassandra.connection.keep_alive_ms", "" + (fetchIntervalMs + 5000));
             //.set("spark.cassandra.auth.username", "cassandra")
             //.set("spark.cassandra.auth.password", "cassandra")
 
@@ -84,10 +85,30 @@ public final class G1Q1 {
             // Pick the messages
             JavaDStream<String> lines = messages.map(Tuple2::_2);
 
-            JavaPairDStream<String, Integer> origins = lines.mapToPair(new RelevantIndexFetcher(AirConstants.ORIGIN_INDEX));
+//            JavaPairDStream<String, Integer> origins = lines.mapToPair(new RelevantIndexFetcher(AirConstants.ORIGIN_INDEX));
+//            JavaPairDStream<String, Integer> destinations = lines.mapToPair(new RelevantIndexFetcher(AirConstants.DEST_INDEX));
+//            JavaPairDStream<String, Integer> allRecs = origins.union(destinations);
 
-            JavaPairDStream<String, Integer> destinations = lines.mapToPair(new RelevantIndexFetcher(AirConstants.DEST_INDEX));
-            JavaPairDStream<String, Integer> allRecs = origins.union(destinations);
+//            JavaPairDStream<String, Integer>  airports = lines.flatMapToPair(new PairFlatMapFunction<String, String, Integer>() {
+//                @Override
+//                public Iterator<Tuple2<String, Integer>> call(String s) throws Exception {
+//                    String a[] = s.split(",");
+//                    List<Tuple2<String, Integer>> apFreq = new ArrayList<>();
+//                    apFreq.add(new Tuple2<>(a[AirConstants.ORIGIN_INDEX],1));
+//                    apFreq.add(new Tuple2<>(a[AirConstants.DEST_INDEX],1));
+//                    return apFreq.iterator();
+//                }
+//            });
+
+            // Use flatMap to parse the incoming stream (each line would return 2 pairs)
+            JavaPairDStream<String, Integer>  allRecs = lines.flatMapToPair((s) -> {
+                    String a[] = s.split(",");
+                    List<Tuple2<String, Integer>> apFreq = new ArrayList<>();
+                    apFreq.add(new Tuple2<>(a[AirConstants.ORIGIN_INDEX],1));
+                    apFreq.add(new Tuple2<>(a[AirConstants.DEST_INDEX],1));
+                    return apFreq.iterator();
+            });
+
 
             JavaPairDStream<String, Integer> summarized = allRecs.reduceByKey((i1, i2) -> i1 + i2);
 
